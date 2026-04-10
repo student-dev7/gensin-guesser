@@ -1,0 +1,33 @@
+rules_version = '2';
+
+// アプリは submit-result が uid / handCount / guessCount を保存（MAX 7 手対応）
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /users/{userId} {
+      allow read: if true;
+      // write だと delete も許可されるため create/update のみ
+      allow create, update: if request.auth != null && request.auth.uid == userId;
+      allow delete: if false;
+    }
+
+    match /runs/{runId} {
+      allow read: if true;
+      // コードはフィールド名 uid を使用（userId ではない）
+      allow create: if request.auth != null
+        && runId.matches('^' + request.auth.uid + '_.+')
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.handCount >= 1
+        && request.resource.data.handCount <= 7
+        && request.resource.data.guessCount >= 0
+        && request.resource.data.guessCount <= 7;
+      allow update, delete: if false;
+    }
+
+    match /character_stats/{charId} {
+      allow read: if true;
+      allow create, update: if request.auth != null;
+      allow delete: if false;
+    }
+  }
+}
