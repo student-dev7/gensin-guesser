@@ -1,6 +1,16 @@
+import type { Metadata } from "next";
 import { collection, getDocs, limit, orderBy, query } from "firebase/firestore";
 import { getPublicFirestore } from "@/lib/firebasePublicFirestore";
 import { RankingTable, type RankRow } from "./RankingTable";
+
+export const metadata: Metadata = {
+  title: "レーティングランキング",
+  description:
+    "原神ゲッサーのレーティングランキング。プレイヤー順位と対戦数を表示します。",
+  alternates: {
+    canonical: "/ranking",
+  },
+};
 
 export const dynamic = "force-dynamic";
 
