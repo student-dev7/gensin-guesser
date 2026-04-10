@@ -53,6 +53,10 @@ export function RankingTable({ rows, error }: Props) {
           <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-white/55">
             Firestore のユーザー別レート上位 50 名です。
           </p>
+          <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-white/40">
+            レートは日本時間で週が切り替わるたび（月曜始まり）に 1500
+            へリセットされ、以降の対戦から再計算されます。
+          </p>
           <div className="mt-8">
             <Link
               href="/"

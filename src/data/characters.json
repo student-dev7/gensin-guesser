@@ -93,7 +93,7 @@
   {"name": "夢見月瑞希", "nameHira": "ゆめみづきみずきみずき", "element": "風", "weapon": "法器", "rarity": 5, "region": "稲妻", "version": 5.4},
   {"name": "ダリア", "element": "水", "weapon": "法器", "rarity": 4, "region": "モンド", "version": 5.7},
   {"name": "コロンビーナ", "element": "水", "weapon": "法器", "rarity": 5, "region": "ナドクライ", "version": 6.3},
-  {"name": "兹白", "nameHira": "しはく", "element": "岩", "weapon": "片手剣", "rarity": 5, "region": "ナドクライ", "version": 6.3},
+  {"name": "兹白", "nameHira": "しはく", "element": "岩", "weapon": "片手剣", "rarity": 5, "region": "璃月", "version": 6.3},
   {"name": "イルーガ", "element": "岩", "weapon": "長柄武器", "rarity": 4, "region": "ナドクライ", "version": 6.3},
   {"name": "ファルカ", "element": "風", "weapon": "両手剣", "rarity": 5, "region": "ナドクライ", "version": 6.4},
   {"name": "フリンズ", "element": "雷", "weapon": "長柄武器", "rarity": 5, "region": "ナドクライ", "version": 6.0},
@@ -109,5 +109,5 @@
   { "name": "アイノ", "element": "水", "weapon": "両手剣", "rarity": 5, "region": "ナドクライ", "version": 6.0 },
   { "name": "ラウマ", "element": "草", "weapon": "法器", "rarity": 5, "region": "ナドクライ", "version": 6.0 },
   { "name": "ネフェル", "element": "草", "weapon": "法器", "rarity": 5, "region": "ナドクライ", "version": 6.1 },
-  { "name": "ドゥリン", "element": "炎", "weapon": "片手剣", "rarity": 5, "region": "ナドクライ", "version": 6.2 }
+  { "name": "ドゥリン", "element": "炎", "weapon": "片手剣", "rarity": 5, "region": "モンド", "version": 6.2 }
 ]

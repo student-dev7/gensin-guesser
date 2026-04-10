@@ -20,6 +20,7 @@ import {
 import { withUserFirestore } from "@/lib/firebaseUserFirestore";
 import { getUidFromIdToken } from "@/lib/identityToolkit";
 import { getRatingWeekMondayKeyJst } from "@/lib/ratingWeek";
+import { goldEarnedFromRatingDelta } from "@/lib/gold";
 import { validateDisplayName } from "@/lib/validateDisplayName";
 
 type SubmitBody = {
@@ -158,6 +159,14 @@ export async function POST(req: Request) {
       return runTransaction(db, async (tx) => {
         const existingRun = await tx.get(runRef);
         if (existingRun.exists()) {
+          const userSnapDup = await tx.get(userRef);
+          const goldTotalDup =
+            userSnapDup.exists() &&
+            typeof userSnapDup.data()?.gold === "number" &&
+            Number.isFinite(userSnapDup.data()?.gold as number)
+              ? (userSnapDup.data()?.gold as number)
+              : 0;
+
           const charStatsSnapDup = await tx.get(charStatsRef);
           const thDup = charStatsSnapDup.exists()
             ? (charStatsSnapDup.data()?.totalHandCount as number | undefined) ??
@@ -200,6 +209,8 @@ export async function POST(req: Request) {
             weeklyResetApplied: Boolean(data.weeklyResetApplied),
             guessCount,
             characterStatsUpdated: false,
+            goldEarned: 0,
+            goldTotal: goldTotalDup,
           };
         }
 
@@ -235,6 +246,13 @@ export async function POST(req: Request) {
           ? (userSnap.data()?.games as number | undefined) ?? 0
           : 0;
 
+        const goldBefore =
+          userSnap.exists() &&
+          typeof userSnap.data()?.gold === "number" &&
+          Number.isFinite(userSnap.data()?.gold as number)
+            ? (userSnap.data()?.gold as number)
+            : 0;
+
         let newRating: number;
         let ratingDelta: number;
         let eloActualScore: number;
@@ -264,6 +282,9 @@ export async function POST(req: Request) {
 
         const gamesAfter = gamesBefore + 1;
 
+        const goldEarned = goldEarnedFromRatingDelta(ratingDelta);
+        const goldTotal = goldBefore + goldEarned;
+
         tx.set(
           userRef,
           {
@@ -272,6 +293,7 @@ export async function POST(req: Request) {
             displayName,
             ratingWeekKey: currentWeekKey,
             updatedAt: serverTimestamp(),
+            ...(goldEarned > 0 ? { gold: increment(goldEarned) } : {}),
           },
           { merge: true }
         );
@@ -292,6 +314,8 @@ export async function POST(req: Request) {
             playerRatingAfter: newRating,
             weeklyResetApplied,
             characterStatsUpdated: shouldIncrementCharacterStats,
+            goldEarned,
+            goldTotalAfter: goldTotal,
             ...(won
               ? {
                   winBaseBonus: winBaseBonus ?? 5,
@@ -340,6 +364,8 @@ export async function POST(req: Request) {
           characterStatsUpdated: shouldIncrementCharacterStats,
           winBaseBonus,
           winSpeedBonus,
+          goldEarned,
+          goldTotal,
         };
       });
     });

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CHARACTERS from "../data/characters.json";
+import { doc, getDoc, getFirestore } from "firebase/firestore";
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
@@ -50,6 +51,10 @@ type RatingStats = {
   weeklyResetApplied?: boolean;
   /** 正解キャラの全プレイヤー記録に基づくベイズ平均手数（サーバー算出） */
   characterAverageHands?: number;
+  /** このラウンドで獲得したゴールド（レート増分×10、重複送信時は 0） */
+  goldEarned?: number;
+  /** 反映後の累計ゴールド */
+  goldTotal?: number;
 };
 
 export default function Home() {
@@ -74,6 +79,8 @@ export default function Home() {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [submitRetryKey, setSubmitRetryKey] = useState(0);
   const submitDoneRoundRef = useRef<string | null>(null);
+  /** null = 読み込み中 */
+  const [totalGold, setTotalGold] = useState<number | null>(null);
 
   const draftPreview = useMemo(
     () => validateDisplayName(nameDraft),
@@ -84,6 +91,32 @@ export default function Home() {
     void ensureAnonymousSession().catch(() => {
       /* 送信時に再試行 */
     });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        await ensureAnonymousSession();
+        const auth = getFirebaseAuth();
+        const uid = auth.currentUser?.uid;
+        if (!uid) {
+          if (!cancelled) setTotalGold(0);
+          return;
+        }
+        const db = getFirestore(auth.app);
+        const snap = await getDoc(doc(db, "users", uid));
+        const raw = snap.exists() ? snap.data()?.gold : undefined;
+        const g =
+          typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
+        if (!cancelled) setTotalGold(g);
+      } catch {
+        if (!cancelled) setTotalGold(0);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -216,6 +249,8 @@ export default function Home() {
           playerRatingAfter?: number;
           weeklyResetApplied?: boolean;
           characterAverageHands?: number;
+          goldEarned?: number;
+          goldTotal?: number;
         };
 
         if (cancelled) return;
@@ -225,6 +260,10 @@ export default function Home() {
         }
 
         submitDoneRoundRef.current = roundId;
+
+        if (typeof json.goldTotal === "number" && Number.isFinite(json.goldTotal)) {
+          setTotalGold(json.goldTotal);
+        }
 
         const before = json.playerRatingBefore ?? 0;
         const after = json.playerRatingAfter ?? before;
@@ -243,6 +282,10 @@ export default function Home() {
             typeof json.characterAverageHands === "number"
               ? json.characterAverageHands
               : undefined,
+          goldEarned:
+            typeof json.goldEarned === "number" ? json.goldEarned : undefined,
+          goldTotal:
+            typeof json.goldTotal === "number" ? json.goldTotal : undefined,
         });
       } catch (e: unknown) {
         if (!cancelled) {
@@ -300,6 +343,17 @@ export default function Home() {
 
   return (
     <div className="flex flex-1 flex-col bg-[#0a0f1e] text-white">
+      <div className="pointer-events-none fixed left-0 top-0 z-40 px-4 pt-4 sm:px-6">
+        <div
+          className="pointer-events-auto rounded-full border border-amber-400/35 bg-[#12182a]/95 px-3 py-2 text-xs font-medium tabular-nums text-amber-100/95 shadow-lg backdrop-blur-sm sm:text-sm"
+          title="レートが増えた分に応じて獲得（将来ショップで使用予定）"
+        >
+          Gold{" "}
+          {totalGold === null
+            ? "…"
+            : Math.round(totalGold).toLocaleString("ja-JP")}
+        </div>
+      </div>
       <div className="pointer-events-none fixed right-0 top-0 z-40 flex gap-2 px-4 pt-4 sm:px-6">
         <Link
           href="/ranking"
@@ -663,21 +717,36 @@ export default function Home() {
                       このラウンドはすでに記録済みです
                     </p>
                   ) : (
-                    <p
-                      className={`mt-2 text-2xl font-bold tabular-nums tracking-tight sm:text-3xl ${
-                        ratingStats.delta >= 0
-                          ? "text-emerald-100"
-                          : "text-rose-100"
-                      }`}
-                    >
-                      レート：{Math.round(ratingStats.before)} →{" "}
-                      {Math.round(ratingStats.after)}
-                      <span className="ml-2 text-xl sm:text-2xl">
-                        (
-                        {ratingStats.delta >= 0 ? "+" : ""}
-                        {Math.round(ratingStats.delta)})
-                      </span>
-                    </p>
+                    <>
+                      <p
+                        className={`mt-2 text-2xl font-bold tabular-nums tracking-tight sm:text-3xl ${
+                          ratingStats.delta >= 0
+                            ? "text-emerald-100"
+                            : "text-rose-100"
+                        }`}
+                      >
+                        レート：{Math.round(ratingStats.before)} →{" "}
+                        {Math.round(ratingStats.after)}
+                        <span className="ml-2 text-xl sm:text-2xl">
+                          (
+                          {ratingStats.delta >= 0 ? "+" : ""}
+                          {Math.round(ratingStats.delta)})
+                        </span>
+                      </p>
+                      {typeof ratingStats.goldEarned === "number" &&
+                        ratingStats.goldEarned > 0 && (
+                          <p className="mt-3 text-sm text-amber-200/90">
+                            +{ratingStats.goldEarned.toLocaleString("ja-JP")}{" "}
+                            Gold（累計{" "}
+                            {typeof ratingStats.goldTotal === "number"
+                              ? Math.round(
+                                  ratingStats.goldTotal
+                                ).toLocaleString("ja-JP")
+                              : "—"}
+                            ）
+                          </p>
+                        )}
+                    </>
                   )}
                 </div>
               )}
