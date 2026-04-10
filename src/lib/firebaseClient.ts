@@ -4,7 +4,9 @@ import { FirebaseApp, getApps, initializeApp } from "firebase/app";
 import {
   browserLocalPersistence,
   getAuth,
+  indexedDBLocalPersistence,
   setPersistence,
+  signInAnonymously,
   type Auth,
 } from "firebase/auth";
 import { getFirebaseWebConfig } from "./firebaseWebConfig";
@@ -21,21 +23,38 @@ function ensureApp(): FirebaseApp {
 }
 
 /**
- * ブラウザを閉じてもセッションを維持する（IndexedDB / localStorage）。
+ * ブラウザを閉じてもセッションを維持する。
+ * IndexedDB は localStorage よりタスクキル・再起動後も残りやすい。
  * signIn より前に await すること。
  */
 export async function ensureFirebaseAuthPersistence(): Promise<void> {
   const auth = getAuth(ensureApp());
   cachedAuth = auth;
   if (!persistencePromise) {
-    persistencePromise = setPersistence(auth, browserLocalPersistence).catch(
-      (err) => {
-        persistencePromise = null;
-        throw err;
+    persistencePromise = (async () => {
+      try {
+        await setPersistence(auth, indexedDBLocalPersistence);
+      } catch {
+        await setPersistence(auth, browserLocalPersistence);
       }
-    );
+    })().catch((err) => {
+      persistencePromise = null;
+      throw err;
+    });
   }
   await persistencePromise;
+}
+
+/**
+ * 永続化を確定したうえで匿名ユーザーを復元または新規作成する。
+ * 初回サインインをゲーム終了まで待たない（タスクキル前に UID がストアに載る）。
+ */
+export async function ensureAnonymousSession(): Promise<void> {
+  await ensureFirebaseAuthPersistence();
+  const auth = getFirebaseAuth();
+  if (!auth.currentUser) {
+    await signInAnonymously(auth);
+  }
 }
 
 export function getFirebaseAuth(): Auth {

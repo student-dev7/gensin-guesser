@@ -4,10 +4,9 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CHARACTERS from "../data/characters.json";
 import {
-  ensureFirebaseAuthPersistence,
+  ensureAnonymousSession,
   getFirebaseAuth,
 } from "../lib/firebaseClient";
-import { signInAnonymously } from "firebase/auth";
 import { validateDisplayName } from "../lib/validateDisplayName";
 
 type Character = (typeof CHARACTERS)[number];
@@ -82,7 +81,9 @@ export default function Home() {
   );
 
   useEffect(() => {
-    void ensureFirebaseAuthPersistence();
+    void ensureAnonymousSession().catch(() => {
+      /* 送信時に再試行 */
+    });
   }, []);
 
   useEffect(() => {
@@ -171,7 +172,7 @@ export default function Home() {
     let cancelled = false;
 
     const run = async () => {
-      await ensureFirebaseAuthPersistence();
+      await ensureAnonymousSession();
 
       const nameCheck = validateDisplayName(playerName);
       if (!nameCheck.ok) {
@@ -190,9 +191,6 @@ export default function Home() {
 
       try {
         const auth = getFirebaseAuth();
-        if (!auth.currentUser) {
-          await signInAnonymously(auth);
-        }
         const idToken = await auth.currentUser!.getIdToken();
 
         const res = await fetch("/api/submit-result", {

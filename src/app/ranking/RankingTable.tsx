@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { RankingAvatar } from "@/components/RankingAvatar";
 import {
-  ensureFirebaseAuthPersistence,
+  ensureAnonymousSession,
   getFirebaseAuth,
 } from "@/lib/firebaseClient";
 
@@ -28,7 +28,7 @@ export function RankingTable({ rows, error }: Props) {
     let cancelled = false;
     void (async () => {
       try {
-        await ensureFirebaseAuthPersistence();
+        await ensureAnonymousSession();
         const uid = getFirebaseAuth().currentUser?.uid ?? null;
         if (!cancelled) setMyUid(uid);
       } catch {
