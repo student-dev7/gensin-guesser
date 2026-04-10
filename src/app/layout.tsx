@@ -14,8 +14,25 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "GenshinGuesser",
-  description: "原神キャラ当てゲーム（Eloランキング対応）",
+  metadataBase: new URL("https://genshin-guesser.vercel.app"),
+  title: "原神ゲッサー - キャラ当てクイズ",
+  description:
+    "元素、武器、地域から原神のキャラクターを当てるクイズゲーム！あなたの原神知識を試そう。",
+  openGraph: {
+    type: "website",
+    url: "https://genshin-guesser.vercel.app",
+    title: "原神ゲッサー - キャラ当てクイズ",
+    description:
+      "元素、武器、地域から原神のキャラクターを当てるクイズゲーム！あなたの原神知識を試そう。",
+    images: [{ url: "/og-image.png" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "原神ゲッサー - キャラ当てクイズ",
+    description:
+      "元素、武器、地域から原神のキャラクターを当てるクイズゲーム！あなたの原神知識を試そう。",
+    images: ["/og-image.png"],
+  },
 };
 
 export default function RootLayout({
