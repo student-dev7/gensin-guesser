@@ -326,13 +326,57 @@ export default function Home() {
           >
             GenshinGuesser
           </h1>
-          <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-white/60">
-            エンドレスモード：ランダム出題。最大 {MAX_GUESSES}{" "}
-            回まで。クリアまたは終了後、モーダルから次の問題へ進めます。
-          </p>
-          <p className="mt-2 text-xs text-white/45">
-            表示名は右上「名前変更」から設定（ランキングに反映）
-          </p>
+
+          <div className="mx-auto mt-5 max-w-lg text-left">
+            <p className="text-center text-sm font-semibold tracking-wide text-[#ece5d8]">
+              【遊び方ガイド】
+            </p>
+            <ul className="mt-3 space-y-2.5 text-sm leading-relaxed text-white/72">
+              <li className="flex gap-2">
+                <span className="shrink-0 select-none text-[#ece5d8]/55" aria-hidden>
+                  ・
+                </span>
+                <span>
+                  全{MAX_GUESSES}手以内に正解を導き出せ！
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="shrink-0 select-none text-[#ece5d8]/55" aria-hidden>
+                  ・
+                </span>
+                <span>
+                  要素が一致すると
+                  <span className="font-bold text-emerald-300">【黄緑色】</span>
+                  に発光します。
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="shrink-0 select-none text-[#ece5d8]/55" aria-hidden>
+                  ・
+                </span>
+                <span>
+                  実装時期（Version）が異なる場合は
+                  <span className="font-bold text-sky-300">【↑ / ↓】</span>
+                  でヒントが表示されます。
+                </span>
+              </li>
+              <li className="flex gap-2">
+                <span className="shrink-0 select-none text-[#ece5d8]/55" aria-hidden>
+                  ・
+                </span>
+                <span>
+                  右上の
+                  <span className="font-semibold text-[#ece5d8]">「名前変更」</span>
+                  から名前を登録して、
+                  <span className="font-bold text-amber-200/95">世界ランキング</span>
+                  に挑もう！
+                </span>
+              </li>
+            </ul>
+            <p className="mt-4 text-center text-[0.8125rem] font-medium leading-snug text-amber-300/95 sm:text-sm">
+              ※クイズは既に始まっています。最初の1手を入力してください！
+            </p>
+          </div>
         </header>
 
         <section className="relative z-30 overflow-visible rounded-2xl border border-[#ece5d8]/20 bg-[#0d1324]/90 p-4 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.6)] backdrop-blur-sm sm:p-5">
