@@ -144,8 +144,12 @@ export async function POST(req: Request) {
     }
 
     const storedHandCount = won ? Math.max(1, rawHandCount) : LOSS_RECORD_HANDS;
+    /** キャラ別平均手数用。負けは実際の予想回数、勝ちは 1 手以上 */
+    const statHandCountForCharacter = won
+      ? Math.max(1, Math.round(rawHandCount))
+      : guessCount;
     const shouldIncrementCharacterStats =
-      won && storedHandCount >= MIN_HANDS_FOR_STATS;
+      !won || statHandCountForCharacter >= MIN_HANDS_FOR_STATS;
 
     const result = await withUserFirestore(idToken, async (db) => {
       const userRef = doc(db, "users", uid);
@@ -333,7 +337,7 @@ export async function POST(req: Request) {
             updatedAt: serverTimestamp(),
           };
           if (shouldIncrementCharacterStats) {
-            charStatsPayload.totalHandCount = increment(storedHandCount);
+            charStatsPayload.totalHandCount = increment(statHandCountForCharacter);
             charStatsPayload.totalWins = increment(1);
           }
           tx.set(charStatsRef, charStatsPayload, { merge: true });
@@ -341,7 +345,7 @@ export async function POST(req: Request) {
 
         const newTotalHandCount =
           totalHandCount +
-          (shouldIncrementCharacterStats ? storedHandCount : 0);
+          (shouldIncrementCharacterStats ? statHandCountForCharacter : 0);
         const newTotalWins =
           totalWins + (shouldIncrementCharacterStats ? 1 : 0);
         const characterAverageHands = bayesianMeanHands(

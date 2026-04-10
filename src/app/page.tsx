@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CHARACTERS from "../data/characters.json";
 import { doc, getDoc, getFirestore } from "firebase/firestore";
+import { GoldCoinIcon } from "../components/GoldCoinIcon";
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
@@ -49,7 +50,7 @@ type RatingStats = {
   delta: number;
   alreadySubmitted: boolean;
   weeklyResetApplied?: boolean;
-  /** 正解キャラの全プレイヤー記録に基づくベイズ平均手数（サーバー算出） */
+  /** 正解キャラの全プレイヤー記録に基づくベイズ平均手数（勝敗・サーバー算出） */
   characterAverageHands?: number;
   /** このラウンドで獲得したゴールド（レート増分×10、重複送信時は 0） */
   goldEarned?: number;
@@ -345,10 +346,10 @@ export default function Home() {
     <div className="flex flex-1 flex-col bg-[#0a0f1e] text-white">
       <div className="pointer-events-none fixed left-0 top-0 z-40 px-4 pt-4 sm:px-6">
         <div
-          className="pointer-events-auto rounded-full border border-amber-400/35 bg-[#12182a]/95 px-3 py-2 text-xs font-medium tabular-nums text-amber-100/95 shadow-lg backdrop-blur-sm sm:text-sm"
+          className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-amber-400/35 bg-[#12182a]/95 px-3 py-2 text-xs font-medium tabular-nums text-amber-100/95 shadow-lg backdrop-blur-sm sm:text-sm"
           title="レートが増えた分に応じて獲得（将来ショップで使用予定）"
         >
-          Gold{" "}
+          <GoldCoinIcon title="ゴールド" />
           {totalGold === null
             ? "…"
             : Math.round(totalGold).toLocaleString("ja-JP")}
@@ -646,7 +647,7 @@ export default function Home() {
             {ratingStats != null &&
               typeof ratingStats.characterAverageHands === "number" && (
                 <p className="mt-3 text-center text-sm leading-relaxed text-sky-200/90">
-                  このキャラの平均手数（全プレイヤー記録・ベイズ推定）:{" "}
+                  このキャラの平均手数（全プレイヤー・勝敗含む・ベイズ推定）:{" "}
                   <span className="font-semibold tabular-nums text-white">
                     {ratingStats.characterAverageHands.toFixed(2)}
                   </span>{" "}
@@ -735,15 +736,19 @@ export default function Home() {
                       </p>
                       {typeof ratingStats.goldEarned === "number" &&
                         ratingStats.goldEarned > 0 && (
-                          <p className="mt-3 text-sm text-amber-200/90">
-                            +{ratingStats.goldEarned.toLocaleString("ja-JP")}{" "}
-                            Gold（累計{" "}
-                            {typeof ratingStats.goldTotal === "number"
-                              ? Math.round(
-                                  ratingStats.goldTotal
-                                ).toLocaleString("ja-JP")
-                              : "—"}
-                            ）
+                          <p className="mt-3 flex items-center justify-center gap-1.5 text-sm text-amber-200/90">
+                            <span>+</span>
+                            <GoldCoinIcon className="h-[1.15em] w-[1.15em] shrink-0 align-[-0.12em] text-amber-200/95" />
+                            <span className="tabular-nums">
+                              {ratingStats.goldEarned.toLocaleString("ja-JP")}
+                              （累計{" "}
+                              {typeof ratingStats.goldTotal === "number"
+                                ? Math.round(
+                                    ratingStats.goldTotal
+                                  ).toLocaleString("ja-JP")
+                                : "—"}
+                              ）
+                            </span>
                           </p>
                         )}
                     </>
