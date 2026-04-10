@@ -5,6 +5,8 @@ export type FirebaseWebConfig = {
   storageBucket: string;
   messagingSenderId: string;
   appId: string;
+  /** Google アナリティクス（Firebase Analytics）用。未設定なら Analytics は初期化しない */
+  measurementId?: string;
 };
 
 /** クライアント・サーバー共通（NEXT_PUBLIC_* はビルド時に埋め込まれる） */
@@ -15,6 +17,8 @@ export function getFirebaseWebConfig(): FirebaseWebConfig {
   const storageBucket = process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET;
   const messagingSenderId = process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID;
   const appId = process.env.NEXT_PUBLIC_FIREBASE_APP_ID;
+  const measurementId =
+    process.env.NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID?.trim() || undefined;
 
   if (
     !apiKey ||
@@ -36,5 +40,6 @@ export function getFirebaseWebConfig(): FirebaseWebConfig {
     storageBucket,
     messagingSenderId,
     appId,
+    ...(measurementId ? { measurementId } : {}),
   };
 }

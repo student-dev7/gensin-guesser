@@ -82,6 +82,8 @@ export default function Home() {
   const submitDoneRoundRef = useRef<string | null>(null);
   /** null = 読み込み中 */
   const [totalGold, setTotalGold] = useState<number | null>(null);
+  const [goldHintOpen, setGoldHintOpen] = useState(false);
+  const goldBarRef = useRef<HTMLDivElement | null>(null);
 
   const draftPreview = useMemo(
     () => validateDisplayName(nameDraft),
@@ -146,6 +148,18 @@ export default function Home() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [nameModalOpen, playerName]);
+
+  useEffect(() => {
+    if (!goldHintOpen) return;
+    const onDown = (e: MouseEvent) => {
+      const el = goldBarRef.current;
+      if (el && !el.contains(e.target as Node)) {
+        setGoldHintOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [goldHintOpen]);
 
   const won = guesses.some((g) => g.name === target.name);
   const finished =
@@ -346,13 +360,29 @@ export default function Home() {
     <div className="flex flex-1 flex-col bg-[#0a0f1e] text-white">
       <div className="pointer-events-none fixed left-0 top-0 z-40 px-4 pt-4 sm:px-6">
         <div
-          className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-amber-400/35 bg-[#12182a]/95 px-3 py-2 text-xs font-medium tabular-nums text-amber-100/95 shadow-lg backdrop-blur-sm sm:text-sm"
-          title="レートが増えた分に応じて獲得（将来ショップで使用予定）"
+          ref={goldBarRef}
+          className="pointer-events-auto relative flex flex-col items-start gap-2"
         >
-          <GoldCoinIcon title="ゴールド" />
-          {totalGold === null
-            ? "…"
-            : Math.round(totalGold).toLocaleString("ja-JP")}
+          <button
+            type="button"
+            onClick={() => setGoldHintOpen((o) => !o)}
+            className="flex items-center gap-1.5 rounded-full border border-amber-400/35 bg-[#12182a]/95 px-3 py-2 text-xs font-medium tabular-nums text-amber-100/95 shadow-lg backdrop-blur-sm transition hover:border-amber-400/55 sm:text-sm"
+            aria-expanded={goldHintOpen}
+            aria-label="ゴールド（説明を表示）"
+          >
+            <GoldCoinIcon title="ゴールド" />
+            {totalGold === null
+              ? "…"
+              : Math.round(totalGold).toLocaleString("ja-JP")}
+          </button>
+          {goldHintOpen && (
+            <div
+              className="max-w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-amber-400/35 bg-[#12182a]/98 px-3 py-2.5 text-left text-xs leading-relaxed text-amber-100/95 shadow-xl shadow-black/40"
+              role="tooltip"
+            >
+              ゴールドはショップでアイコンを囲むフレームやアイコンの購入などに使えます（準備中）。
+            </div>
+          )}
         </div>
       </div>
       <div className="pointer-events-none fixed right-0 top-0 z-40 flex gap-2 px-4 pt-4 sm:px-6">
@@ -361,6 +391,12 @@ export default function Home() {
           className={`pointer-events-auto rounded-full border border-[#ece5d8]/25 bg-[#12182a]/95 px-3 py-2 text-xs font-medium text-[#ece5d8] shadow-lg backdrop-blur-sm transition hover:border-[#ece5d8]/45 sm:text-sm`}
         >
           ランキング
+        </Link>
+        <Link
+          href="/shop"
+          className={`pointer-events-auto rounded-full border border-amber-500/35 bg-[#12182a]/95 px-3 py-2 text-xs font-medium text-amber-100/90 shadow-lg backdrop-blur-sm transition hover:border-amber-400/55 sm:text-sm`}
+        >
+          ショップ
         </Link>
         <button
           type="button"
