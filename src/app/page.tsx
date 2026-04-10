@@ -49,6 +49,8 @@ type RatingStats = {
   delta: number;
   alreadySubmitted: boolean;
   weeklyResetApplied?: boolean;
+  /** 正解キャラの全プレイヤー記録に基づくベイズ平均手数（サーバー算出） */
+  characterAverageHands?: number;
 };
 
 export default function Home() {
@@ -215,6 +217,7 @@ export default function Home() {
           playerRatingBefore?: number;
           playerRatingAfter?: number;
           weeklyResetApplied?: boolean;
+          characterAverageHands?: number;
         };
 
         if (cancelled) return;
@@ -238,6 +241,10 @@ export default function Home() {
           delta,
           alreadySubmitted: Boolean(json.alreadySubmitted),
           weeklyResetApplied: Boolean(json.weeklyResetApplied),
+          characterAverageHands:
+            typeof json.characterAverageHands === "number"
+              ? json.characterAverageHands
+              : undefined,
         });
       } catch (e: unknown) {
         if (!cancelled) {
@@ -584,6 +591,16 @@ export default function Home() {
             <p className="mt-2 text-center text-3xl font-bold tracking-tight text-white">
               {target.name}
             </p>
+            {ratingStats != null &&
+              typeof ratingStats.characterAverageHands === "number" && (
+                <p className="mt-3 text-center text-sm leading-relaxed text-sky-200/90">
+                  このキャラの平均手数（全プレイヤー記録・ベイズ推定）:{" "}
+                  <span className="font-semibold tabular-nums text-white">
+                    {ratingStats.characterAverageHands.toFixed(2)}
+                  </span>{" "}
+                  手
+                </p>
+              )}
 
             {won && (
               <p className="mt-6 text-center text-sm text-white/65">

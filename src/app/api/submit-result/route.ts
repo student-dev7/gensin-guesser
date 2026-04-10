@@ -158,13 +158,30 @@ export async function POST(req: Request) {
       return runTransaction(db, async (tx) => {
         const existingRun = await tx.get(runRef);
         if (existingRun.exists()) {
+          const charStatsSnapDup = await tx.get(charStatsRef);
+          const thDup = charStatsSnapDup.exists()
+            ? (charStatsSnapDup.data()?.totalHandCount as number | undefined) ??
+              0
+            : 0;
+          const twDup = charStatsSnapDup.exists()
+            ? (charStatsSnapDup.data()?.totalWins as number | undefined) ?? 0
+            : 0;
+          const characterAverageHands = bayesianMeanHands(thDup, twDup);
+
           const data = existingRun.data() as {
             playerRatingAfter?: number;
             playerRatingBefore?: number;
             averageHandCount?: number;
+            averageHandCountUsed?: number;
             storedHandCount?: number;
             weeklyResetApplied?: boolean;
           };
+          const usedForElo =
+            typeof data.averageHandCountUsed === "number"
+              ? data.averageHandCountUsed
+              : typeof data.averageHandCount === "number"
+                ? data.averageHandCount
+                : DEFAULT_AVG_HANDS;
           return {
             ok: true as const,
             alreadySubmitted: true,
@@ -174,10 +191,8 @@ export async function POST(req: Request) {
             playerRatingBefore:
               data.playerRatingBefore ?? DEFAULT_INITIAL_RATING,
             eloActualScore: 0,
-            averageHandCount:
-              typeof data.averageHandCount === "number"
-                ? data.averageHandCount
-                : DEFAULT_AVG_HANDS,
+            averageHandCount: usedForElo,
+            characterAverageHands,
             storedHandCount:
               typeof data.storedHandCount === "number"
                 ? data.storedHandCount
@@ -300,6 +315,16 @@ export async function POST(req: Request) {
           tx.set(charStatsRef, charStatsPayload, { merge: true });
         }
 
+        const newTotalHandCount =
+          totalHandCount +
+          (shouldIncrementCharacterStats ? storedHandCount : 0);
+        const newTotalWins =
+          totalWins + (shouldIncrementCharacterStats ? 1 : 0);
+        const characterAverageHands = bayesianMeanHands(
+          newTotalHandCount,
+          newTotalWins
+        );
+
         return {
           ok: true as const,
           alreadySubmitted: false,
@@ -308,6 +333,7 @@ export async function POST(req: Request) {
           ratingDelta,
           eloActualScore,
           averageHandCount,
+          characterAverageHands,
           storedHandCount,
           weeklyResetApplied,
           guessCount,
