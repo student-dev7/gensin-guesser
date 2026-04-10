@@ -98,7 +98,7 @@
   {"name": "ファルカ", "element": "風", "weapon": "両手剣", "rarity": 5, "region": "ナドクライ", "version": 6.4},
   {"name": "フリンズ", "element": "雷", "weapon": "長柄武器", "rarity": 5, "region": "ナドクライ", "version": 6.0},
   {"name": "スカーク", "element": "氷", "weapon": "片手剣", "rarity": 5, "region": "", "version": 5.7},
-  {"name": "エスコフィエ", "element": "氷", "weapon": "長柄武器", "rarity": 5, "region": "ナドクライ", "version": 6.4},
+  {"name": "エスコフィエ", "element": "氷", "weapon": "長柄武器", "rarity": 5, "region": "フォンテーヌ", "version": 5.6},
   {"name": "リンネア", "element": "岩", "weapon": "弓", "rarity": 5, "region": "ナドクライ", "version": 6.5},
   {"name": "セトス", "element": "雷", "weapon": "弓", "rarity": 4, "region": "スメール", "version": 4.7},
   {"name": "タルタリヤ", "element": "水", "weapon": "弓", "rarity": 5, "region": "スネージナヤ", "version": 1.1},

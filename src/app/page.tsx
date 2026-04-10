@@ -355,9 +355,11 @@ export default function Home() {
                   ・
                 </span>
                 <span>
-                  実装時期（Version）が異なる場合は
+                  各行の「予想Ver」は
+                  <span className="font-semibold text-[#ece5d8]">その予想キャラ</span>
+                  の実装バージョンです。正解より古い／新しい場合は
                   <span className="font-bold text-sky-300">【↑ / ↓】</span>
-                  でヒントが表示されます。
+                  が付きます。
                 </span>
               </li>
               <li className="flex gap-2">
@@ -489,7 +491,7 @@ export default function Home() {
                   className={matchClass(g.region === target.region)}
                 />
                 <Tile
-                  label="Ver"
+                  label="予想Ver"
                   value={(() => {
                     const gv = getVer(g);
                     const tv = getVer(target);
