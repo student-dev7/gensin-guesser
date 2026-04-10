@@ -33,6 +33,9 @@ export const metadata: Metadata = {
       "元素、武器、地域から原神のキャラクターを当てるクイズゲーム！あなたの原神知識を試そう。",
     images: ["/og-image.png"],
   },
+  verification: {
+    google: "x382kq_fM331W5JHWhj7AuI_0SAfi-7nmd7TdZ2G72g",
+  },
 };
 
 export default function RootLayout({
