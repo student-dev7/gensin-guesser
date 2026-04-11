@@ -72,10 +72,17 @@ export const RANK_BANDS: readonly RankBand[] = [
   { id: "grandmaster", nameJa: "グランドマスター", min: 2460, max: 2899, tierWidth: 110 },
   { id: "epic", nameJa: "エピック", min: 2900, max: 3419, tierWidth: 130 },
   { id: "legend", nameJa: "レジェンド", min: 3420, max: 4019, tierWidth: 150 },
-  { id: "mythic", nameJa: "ミシック", min: 4020, max: 4419, tierWidth: 100 },
+  {
+    id: "mythic",
+    nameJa: "ミシック",
+    min: 4020,
+    max: 7499,
+    /** 4020〜7499 を IV〜I に4分割（7500 からミシックグローリー） */
+    tierWidth: 870,
+  },
 ] as const;
 
-export const MYTHIC_GLORY_MIN = 4420;
+export const MYTHIC_GLORY_MIN = 7500;
 
 export function rankImagePath(rankId: RankId): string {
   return `/assets/ranks/${rankId}.png`;
