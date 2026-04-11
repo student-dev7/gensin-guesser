@@ -40,11 +40,11 @@ export function MyRankStatus(props: Props) {
 
   return (
     <>
-      <section className="shrink-0" aria-label="マイランク">
+      <section className="flex shrink-0 flex-col items-center" aria-label="マイランク">
         <button
           type="button"
           onClick={() => setModalOpen(true)}
-          className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[#ece5d8]/25 bg-[#12182a]/90 shadow-md shadow-black/30 outline-none transition hover:border-[#ece5d8]/45 hover:shadow-lg focus-visible:ring-2 focus-visible:ring-[#ece5d8]/40 sm:h-14 sm:w-14"
+          className="group flex shrink-0 flex-col items-center gap-1 rounded-xl border border-transparent bg-transparent py-0.5 outline-none transition hover:border-[#ece5d8]/20 focus-visible:ring-2 focus-visible:ring-[#ece5d8]/40"
           aria-haspopup="dialog"
           aria-expanded={modalOpen}
           aria-label={
@@ -54,7 +54,7 @@ export function MyRankStatus(props: Props) {
           }
         >
           <div
-            className="relative h-full w-full"
+            className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-[#ece5d8]/25 bg-[#12182a]/90 shadow-md shadow-black/30 transition group-hover:border-[#ece5d8]/45 group-hover:shadow-lg sm:h-14 sm:w-14"
             style={{ boxShadow: `inset 0 0 0 1px ${accent}40` }}
           >
             {loading ? (
@@ -81,6 +81,9 @@ export function MyRankStatus(props: Props) {
               </div>
             )}
           </div>
+          <span className="select-none text-[0.62rem] font-medium tracking-wide text-[#ece5d8]/65 sm:text-[0.65rem]">
+            ランク
+          </span>
         </button>
       </section>
 

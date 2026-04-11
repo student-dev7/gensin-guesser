@@ -29,5 +29,23 @@ service cloud.firestore {
       allow create, update: if request.auth != null;
       allow delete: if false;
     }
+
+    // ロビーチャット（匿名 UID で送受信）
+    // hasOnly だとフィールド追加のたびにルール更新が必要。hasAll なら必須キーだけ揃えばよく、任意フィールドを後から足しやすい
+    match /chat_messages/{msgId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasAll(['text', 'displayName', 'uid', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.text is string
+        && request.resource.data.text.size() > 0
+        && request.resource.data.text.size() <= 80
+        && request.resource.data.displayName is string
+        && request.resource.data.displayName.size() >= 1
+        && request.resource.data.displayName.size() <= 12
+        // serverTimestamp() 相当（クライアントが時刻を偽装できない）
+        && request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
   }
 }

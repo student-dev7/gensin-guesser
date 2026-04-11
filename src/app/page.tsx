@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CHARACTERS from "../data/characters.json";
 import { doc, getDoc, getFirestore } from "firebase/firestore";
+import { ChatRoomPanel } from "../components/ChatRoomPanel";
 import { GoldCoinIcon } from "../components/GoldCoinIcon";
 import { MyRankStatus } from "../components/MyRankStatus";
 import { DEFAULT_INITIAL_RATING } from "../lib/elo";
@@ -89,6 +90,7 @@ export default function Home() {
   const [peakRating, setPeakRating] = useState<number | null>(null);
   const [userProfileLoading, setUserProfileLoading] = useState(true);
   const [goldHintOpen, setGoldHintOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const goldBarRef = useRef<HTMLDivElement | null>(null);
 
   const syncUserProfile = useCallback(async () => {
@@ -426,6 +428,14 @@ export default function Home() {
                 ゴールドはショップでアイコンを囲むフレームやアイコンの購入などに使えます（準備中）。
               </div>
             )}
+            <button
+              type="button"
+              onClick={() => setChatOpen(true)}
+              className="w-full rounded-full border border-sky-400/35 bg-[#12182a]/95 px-2.5 py-1.5 text-left text-xs font-medium text-sky-100/95 shadow-sm backdrop-blur-sm transition hover:border-sky-400/55 sm:px-3 sm:py-2 sm:text-sm"
+              aria-haspopup="dialog"
+            >
+              チャットを開く
+            </button>
           </div>
 
           <Link
@@ -664,6 +674,13 @@ export default function Home() {
           ))}
         </section>
       </div>
+
+      {chatOpen && (
+        <ChatRoomPanel
+          playerName={playerName}
+          onClose={() => setChatOpen(false)}
+        />
+      )}
 
       {nameModalOpen && (
         <div
