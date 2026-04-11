@@ -76,10 +76,9 @@ export function rankImagePath(rankId: RankId): string {
 
 /**
  * 同じ枠内での表示倍率（中央・はみ出しは枠でクリップ）。
- * epic は初期の PNG に余白が多く、後からトリミングしてもキャンバス比の癖で小さく見えやすいためだけ強めに拡大。
+ * 全ランク同一倍率（1）。
  */
-export function getRankLogoContentScale(rankId: RankId): number {
-  if (rankId === "epic") return 1.5;
+export function getRankLogoContentScale(_rankId: RankId): number {
   return 1;
 }
 
