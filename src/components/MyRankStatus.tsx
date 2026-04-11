@@ -1,8 +1,8 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { useState } from "react";
-import { RankDetailModal } from "@/components/RankDetailModal";
 import {
   getRankAccentHex,
   getRankData,
@@ -11,16 +11,13 @@ import {
 } from "@/lib/rankUtils";
 
 type Props = {
-  /** シーズン用レート current_rate（週次リセット対象） */
-  seasonRating: number | null;
   /** 累計レート lifetime_total_rate（ランク・昇格表示の基準） */
   lifetimeTotalRate: number | null;
   loading: boolean;
 };
 
 export function MyRankStatus(props: Props) {
-  const { seasonRating, lifetimeTotalRate, loading } = props;
-  const [modalOpen, setModalOpen] = useState(false);
+  const { lifetimeTotalRate, loading } = props;
   const [logoOk, setLogoOk] = useState(true);
 
   const rankRate = rateForRankDisplay(lifetimeTotalRate);
@@ -35,20 +32,16 @@ export function MyRankStatus(props: Props) {
       : data.rankName;
 
   return (
-    <>
-      <section className="flex shrink-0 flex-col items-center" aria-label="マイランク">
-        <button
-          type="button"
-          onClick={() => setModalOpen(true)}
-          className="group flex shrink-0 flex-col items-center gap-1 rounded-xl border border-transparent bg-transparent py-0.5 outline-none transition hover:border-[#ece5d8]/20 focus-visible:ring-2 focus-visible:ring-[#ece5d8]/40"
-          aria-haspopup="dialog"
-          aria-expanded={modalOpen}
-          aria-label={
-            loading
-              ? "ランク読み込み中（タップで詳細）"
-              : `ランク詳細を開く（${tierLine}）`
-          }
-        >
+    <section className="flex shrink-0 flex-col items-center" aria-label="マイランク">
+      <Link
+        href="/rank"
+        className="group flex shrink-0 flex-col items-center gap-1 rounded-xl border border-transparent bg-transparent py-0.5 outline-none transition hover:border-[#ece5d8]/20 focus-visible:ring-2 focus-visible:ring-[#ece5d8]/40"
+        aria-label={
+          loading
+            ? "ランク読み込み中（タップで詳細）"
+            : `ランク詳細へ（${tierLine}）`
+        }
+      >
           <div
             className="relative h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-[#ece5d8]/25 bg-[#12182a]/90 shadow-md shadow-black/30 transition group-hover:border-[#ece5d8]/45 group-hover:shadow-lg sm:h-14 sm:w-14"
             style={{ boxShadow: `inset 0 0 0 1px ${accent}40` }}
@@ -77,18 +70,10 @@ export function MyRankStatus(props: Props) {
               </div>
             )}
           </div>
-          <span className="select-none text-[0.62rem] font-medium tracking-wide text-[#ece5d8]/65 sm:text-[0.65rem]">
-            ランク
-          </span>
-        </button>
-      </section>
-
-      <RankDetailModal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        rankDisplayRating={rankRate}
-        seasonRating={seasonRating}
-      />
-    </>
+        <span className="select-none text-[0.62rem] font-medium tracking-wide text-[#ece5d8]/65 sm:text-[0.65rem]">
+          ランク
+        </span>
+      </Link>
+    </section>
   );
 }

@@ -14,15 +14,7 @@ import {
   ensureAnonymousSession,
   getFirebaseAuth,
 } from "@/lib/firebaseClient";
-
-function isDevLocalhostHost(hostname: string): boolean {
-  return (
-    hostname === "localhost" ||
-    hostname === "127.0.0.1" ||
-    hostname === "[::1]" ||
-    hostname === "::1"
-  );
-}
+import { isDevLocalhostHost } from "@/lib/devLocalhost";
 
 export function DebugUserTools() {
   const [showUi, setShowUi] = useState(false);

@@ -85,7 +85,8 @@ export function rankImagePath(rankId: RankId): string {
  * 同じ枠内での表示倍率（中央・はみ出しは枠でクリップ）。
  * 全ランク同一倍率（1）。
  */
-export function getRankLogoContentScale(_rankId: RankId): number {
+export function getRankLogoContentScale(rankId: RankId): number {
+  void rankId;
   return 1;
 }
 
@@ -170,6 +171,65 @@ export function getRankData(rate: number): RankData {
     bracketMin: low,
     bracketMax: high,
   };
+}
+
+/** 下位→高位（ミシックグローリーが最終） */
+const LADDER_RANK_ORDER: readonly RankId[] = [
+  "warrior",
+  "elite",
+  "master",
+  "grandmaster",
+  "epic",
+  "legend",
+  "mythic",
+  "mythic-glory",
+] as const;
+
+function rankLadderIndex(rankId: RankId): number {
+  return LADDER_RANK_ORDER.indexOf(rankId);
+}
+
+const ROMAN_STEP: Record<RomanTier, number> = {
+  IV: 0,
+  III: 1,
+  II: 2,
+  I: 3,
+};
+
+/** ランク名＋ローマティア（累計レート表示用） */
+export function formatRankTierLine(data: RankData): string {
+  return data.tierRoman != null
+    ? `${data.rankName} ${data.tierRoman}`
+    : data.rankName;
+}
+
+/**
+ * 累計レートが before→after で、ランク帯またはティアが一段上がったか。
+ * 同じティア内の数値上昇のみでは false。
+ */
+export function isLifetimeTierOrRankPromoted(
+  lifetimeBefore: number,
+  lifetimeAfter: number
+): boolean {
+  if (
+    !Number.isFinite(lifetimeBefore) ||
+    !Number.isFinite(lifetimeAfter) ||
+    lifetimeAfter <= lifetimeBefore
+  ) {
+    return false;
+  }
+  const before = getRankData(lifetimeBefore);
+  const after = getRankData(lifetimeAfter);
+
+  const ai = rankLadderIndex(after.rankId);
+  const bi = rankLadderIndex(before.rankId);
+  if (ai > bi) return true;
+  if (ai < bi) return false;
+
+  if (before.tierRoman != null && after.tierRoman != null) {
+    return ROMAN_STEP[after.tierRoman] > ROMAN_STEP[before.tierRoman];
+  }
+  return false;
 }
 
 /**

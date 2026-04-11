@@ -22,6 +22,11 @@ import { withUserFirestore } from "@/lib/firebaseUserFirestore";
 import { getUidFromIdToken } from "@/lib/identityToolkit";
 import { getRatingWeekMondayKeyJst } from "@/lib/ratingWeek";
 import { goldEarnedFromRatingDelta } from "@/lib/gold";
+import {
+  formatRankTierLine,
+  getRankData,
+  isLifetimeTierOrRankPromoted,
+} from "@/lib/rankUtils";
 import { validateDisplayName } from "@/lib/validateDisplayName";
 
 type SubmitBody = {
@@ -238,6 +243,7 @@ export async function POST(req: Request) {
             characterStatsUpdated: false,
             goldEarned: 0,
             goldTotal: goldTotalDup,
+            lifetimeTierPromoted: false,
           };
         }
 
@@ -313,6 +319,14 @@ export async function POST(req: Request) {
         const goldTotal = goldBefore + goldEarned;
 
         const newLifetimeTotal = clampRating(lifetimeTotal + ratingDelta);
+
+        const lifetimeTierPromoted = isLifetimeTierOrRankPromoted(
+          lifetimeTotal,
+          newLifetimeTotal
+        );
+        const promotedToRankLabel = lifetimeTierPromoted
+          ? formatRankTierLine(getRankData(newLifetimeTotal))
+          : undefined;
 
         tx.set(
           userRef,
@@ -397,6 +411,8 @@ export async function POST(req: Request) {
           winSpeedBonus,
           goldEarned,
           goldTotal,
+          lifetimeTierPromoted,
+          promotedToRankLabel,
         };
       });
     });

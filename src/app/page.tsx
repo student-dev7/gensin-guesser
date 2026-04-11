@@ -13,6 +13,7 @@ import {
   getFirebaseAuth,
 } from "../lib/firebaseClient";
 import { DEBUG_USER_UPDATED_EVENT } from "../lib/debugUserEvents";
+import { isDevLocalhostHost } from "../lib/devLocalhost";
 import { validateDisplayName } from "../lib/validateDisplayName";
 
 type Character = (typeof CHARACTERS)[number];
@@ -60,6 +61,10 @@ type RatingStats = {
   goldEarned?: number;
   /** 反映後の累計ゴールド */
   goldTotal?: number;
+  /** 累計レートでティアまたはランク帯が一段上がった（この送信で初めて記録したときのみ） */
+  lifetimeTierPromoted?: boolean;
+  /** 昇格後の表示ラベル（例: ウォリアー III） */
+  promotedToRankLabel?: string;
 };
 
 export default function Home() {
@@ -86,8 +91,6 @@ export default function Home() {
   const submitDoneRoundRef = useRef<string | null>(null);
   /** null = 読み込み中 */
   const [totalGold, setTotalGold] = useState<number | null>(null);
-  /** Firestore current_rate（シーズン・週次リセット対象） */
-  const [seasonRating, setSeasonRating] = useState<number | null>(null);
   /** Firestore lifetime_total_rate（累計・ランク表示の基準） */
   const [lifetimeTotalRate, setLifetimeTotalRate] = useState<number | null>(
     null
@@ -96,6 +99,9 @@ export default function Home() {
   const [goldHintOpen, setGoldHintOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const goldBarRef = useRef<HTMLDivElement | null>(null);
+  /** localhost のみ（DBG と同条件） */
+  const [debugHost, setDebugHost] = useState(false);
+  const [debugRevealAnswer, setDebugRevealAnswer] = useState(false);
 
   const syncUserProfile = useCallback(async () => {
     try {
@@ -104,7 +110,6 @@ export default function Home() {
       const uid = auth.currentUser?.uid;
       if (!uid) {
         setTotalGold(0);
-        setSeasonRating(null);
         setLifetimeTotalRate(null);
         setUserProfileLoading(false);
         return;
@@ -113,7 +118,6 @@ export default function Home() {
       const snap = await getDoc(doc(db, "users", uid));
       if (!snap.exists()) {
         setTotalGold(0);
-        setSeasonRating(DEFAULT_INITIAL_RATING);
         setLifetimeTotalRate(DEFAULT_INITIAL_RATING);
         setUserProfileLoading(false);
         return;
@@ -121,12 +125,6 @@ export default function Home() {
       const d = snap.data();
       const g =
         typeof d?.gold === "number" && Number.isFinite(d.gold) ? d.gold : 0;
-      const season =
-        typeof d?.current_rate === "number" && Number.isFinite(d.current_rate)
-          ? d.current_rate
-          : typeof d?.rating === "number" && Number.isFinite(d.rating)
-            ? d.rating
-            : DEFAULT_INITIAL_RATING;
       const lifetime =
         typeof d?.lifetime_total_rate === "number" &&
         Number.isFinite(d.lifetime_total_rate)
@@ -135,11 +133,9 @@ export default function Home() {
             ? d.rating
             : DEFAULT_INITIAL_RATING;
       setTotalGold(g);
-      setSeasonRating(season);
       setLifetimeTotalRate(lifetime);
     } catch {
       setTotalGold(0);
-      setSeasonRating(DEFAULT_INITIAL_RATING);
       setLifetimeTotalRate(DEFAULT_INITIAL_RATING);
     } finally {
       setUserProfileLoading(false);
@@ -179,6 +175,10 @@ export default function Home() {
     } catch {
       /* ignore */
     }
+  }, []);
+
+  useEffect(() => {
+    setDebugHost(isDevLocalhostHost(window.location.hostname));
   }, []);
 
   useEffect(() => {
@@ -316,6 +316,8 @@ export default function Home() {
           characterAverageHands?: number;
           goldEarned?: number;
           goldTotal?: number;
+          lifetimeTierPromoted?: boolean;
+          promotedToRankLabel?: string;
         };
 
         if (cancelled) return;
@@ -351,6 +353,11 @@ export default function Home() {
             typeof json.goldEarned === "number" ? json.goldEarned : undefined,
           goldTotal:
             typeof json.goldTotal === "number" ? json.goldTotal : undefined,
+          lifetimeTierPromoted: Boolean(json.lifetimeTierPromoted),
+          promotedToRankLabel:
+            typeof json.promotedToRankLabel === "string"
+              ? json.promotedToRankLabel
+              : undefined,
         });
       } catch (e: unknown) {
         if (!cancelled) {
@@ -390,6 +397,7 @@ export default function Home() {
     setRatingStats(null);
     setSubmitError(null);
     setSubmitLoading(false);
+    setDebugRevealAnswer(false);
   }, [list]);
 
   const saveNameFromModal = useCallback(() => {
@@ -444,7 +452,6 @@ export default function Home() {
           </Link>
 
           <MyRankStatus
-            seasonRating={seasonRating}
             lifetimeTotalRate={lifetimeTotalRate}
             loading={userProfileLoading}
           />
@@ -588,6 +595,24 @@ export default function Home() {
           </div>
           {message && (
             <p className="mt-2 text-sm text-amber-300/95">{message}</p>
+          )}
+
+          {debugHost && (
+            <div className="mt-2 rounded-lg border border-rose-500/35 bg-rose-950/30 px-3 py-2">
+              <button
+                type="button"
+                onClick={() => setDebugRevealAnswer((v) => !v)}
+                aria-pressed={debugRevealAnswer}
+                className="text-left text-xs font-medium text-rose-100/95 underline decoration-rose-400/50 underline-offset-2 hover:text-rose-50"
+              >
+                {debugRevealAnswer ? "正解を隠す" : "正解を表示（デバッグ）"}
+              </button>
+              {debugRevealAnswer && (
+                <p className="mt-1.5 font-mono text-sm font-semibold text-rose-50">
+                  正解: {target.name}
+                </p>
+              )}
+            </div>
           )}
 
           {!finished && (
@@ -756,6 +781,26 @@ export default function Home() {
             <p className="mt-2 text-center text-3xl font-bold tracking-tight text-white">
               {target.name}
             </p>
+
+            {ratingStats?.lifetimeTierPromoted &&
+              !ratingStats.alreadySubmitted &&
+              ratingStats.promotedToRankLabel && (
+                <div
+                  className="mt-5 rounded-xl border border-amber-400/45 bg-gradient-to-br from-amber-950/55 via-[#12182a] to-emerald-950/40 px-4 py-4 text-center shadow-[0_0_28px_-8px_rgba(251,191,36,0.35)]"
+                  role="status"
+                >
+                  <p className="text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-amber-200/95">
+                    ティア昇格
+                  </p>
+                  <p className="mt-2 text-xl font-bold tracking-tight text-[#ece5d8] sm:text-2xl">
+                    {ratingStats.promotedToRankLabel}
+                  </p>
+                  <p className="mt-1.5 text-xs text-white/50">
+                    累計レートの到達で新しいティア／ランク帯に到達しました
+                  </p>
+                </div>
+              )}
+
             {ratingStats != null &&
               typeof ratingStats.characterAverageHands === "number" && (
                 <p className="mt-3 text-center text-sm leading-relaxed text-sky-200/90">
