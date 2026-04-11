@@ -5,10 +5,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CHARACTERS from "../data/characters.json";
 import { doc, getDoc, getFirestore } from "firebase/firestore";
 import { GoldCoinIcon } from "../components/GoldCoinIcon";
+import { MyRankStatus } from "../components/MyRankStatus";
+import { DEFAULT_INITIAL_RATING } from "../lib/elo";
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
 } from "../lib/firebaseClient";
+import { DEBUG_USER_UPDATED_EVENT } from "../lib/debugUserEvents";
 import { validateDisplayName } from "../lib/validateDisplayName";
 
 type Character = (typeof CHARACTERS)[number];
@@ -82,8 +85,55 @@ export default function Home() {
   const submitDoneRoundRef = useRef<string | null>(null);
   /** null = 読み込み中 */
   const [totalGold, setTotalGold] = useState<number | null>(null);
+  const [weeklyRating, setWeeklyRating] = useState<number | null>(null);
+  const [peakRating, setPeakRating] = useState<number | null>(null);
+  const [userProfileLoading, setUserProfileLoading] = useState(true);
   const [goldHintOpen, setGoldHintOpen] = useState(false);
   const goldBarRef = useRef<HTMLDivElement | null>(null);
+
+  const syncUserProfile = useCallback(async () => {
+    try {
+      await ensureAnonymousSession();
+      const auth = getFirebaseAuth();
+      const uid = auth.currentUser?.uid;
+      if (!uid) {
+        setTotalGold(0);
+        setWeeklyRating(null);
+        setPeakRating(null);
+        setUserProfileLoading(false);
+        return;
+      }
+      const db = getFirestore(auth.app);
+      const snap = await getDoc(doc(db, "users", uid));
+      if (!snap.exists()) {
+        setTotalGold(0);
+        setWeeklyRating(DEFAULT_INITIAL_RATING);
+        setPeakRating(null);
+        setUserProfileLoading(false);
+        return;
+      }
+      const d = snap.data();
+      const g =
+        typeof d?.gold === "number" && Number.isFinite(d.gold) ? d.gold : 0;
+      const r =
+        typeof d?.rating === "number" && Number.isFinite(d.rating)
+          ? d.rating
+          : DEFAULT_INITIAL_RATING;
+      const p =
+        typeof d?.peakRating === "number" && Number.isFinite(d.peakRating)
+          ? d.peakRating
+          : null;
+      setTotalGold(g);
+      setWeeklyRating(r);
+      setPeakRating(p);
+    } catch {
+      setTotalGold(0);
+      setWeeklyRating(DEFAULT_INITIAL_RATING);
+      setPeakRating(null);
+    } finally {
+      setUserProfileLoading(false);
+    }
+  }, []);
 
   const draftPreview = useMemo(
     () => validateDisplayName(nameDraft),
@@ -97,30 +147,19 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        await ensureAnonymousSession();
-        const auth = getFirebaseAuth();
-        const uid = auth.currentUser?.uid;
-        if (!uid) {
-          if (!cancelled) setTotalGold(0);
-          return;
-        }
-        const db = getFirestore(auth.app);
-        const snap = await getDoc(doc(db, "users", uid));
-        const raw = snap.exists() ? snap.data()?.gold : undefined;
-        const g =
-          typeof raw === "number" && Number.isFinite(raw) ? raw : 0;
-        if (!cancelled) setTotalGold(g);
-      } catch {
-        if (!cancelled) setTotalGold(0);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    void syncUserProfile();
+  }, [syncUserProfile]);
+
+  useEffect(() => {
+    if (ratingStats == null) return;
+    void syncUserProfile();
+  }, [ratingStats, syncUserProfile]);
+
+  useEffect(() => {
+    const onDebugUser = () => void syncUserProfile();
+    window.addEventListener(DEBUG_USER_UPDATED_EVENT, onDebugUser);
+    return () => window.removeEventListener(DEBUG_USER_UPDATED_EVENT, onDebugUser);
+  }, [syncUserProfile]);
 
   useEffect(() => {
     try {
@@ -357,60 +396,72 @@ export default function Home() {
     query.trim().length > 0 && suggestions.length > 0 && !finished;
 
   return (
-    <div className="flex flex-1 flex-col bg-[#0a0f1e] text-white">
-      <div className="pointer-events-none fixed left-0 top-0 z-40 px-4 pt-4 sm:px-6">
-        <div
-          ref={goldBarRef}
-          className="pointer-events-auto relative flex flex-col items-start gap-2"
+    <div className="flex min-h-screen flex-1 flex-col bg-[#0a0f1e] text-white">
+      <header className="relative z-10 w-full shrink-0 border-b border-[#ece5d8]/10 bg-[#0a0f1e]/92 px-3 py-2 backdrop-blur-sm sm:px-6">
+        <nav
+          className="mx-auto flex w-full max-w-4xl flex-wrap items-center gap-x-2 gap-y-2 sm:gap-x-3"
+          aria-label="メインナビゲーション"
         >
+          <div
+            ref={goldBarRef}
+            className="relative flex shrink-0 flex-col items-start gap-1.5"
+          >
+            <button
+              type="button"
+              onClick={() => setGoldHintOpen((o) => !o)}
+              className="flex items-center gap-1.5 rounded-full border border-amber-400/35 bg-[#12182a]/95 px-2.5 py-1.5 text-xs font-medium tabular-nums text-amber-100/95 shadow-sm backdrop-blur-sm transition hover:border-amber-400/55 sm:px-3 sm:py-2 sm:text-sm"
+              aria-expanded={goldHintOpen}
+              aria-label="ゴールド（説明を表示）"
+            >
+              <GoldCoinIcon title="ゴールド" />
+              {totalGold === null
+                ? "…"
+                : Math.round(totalGold).toLocaleString("ja-JP")}
+            </button>
+            {goldHintOpen && (
+              <div
+                className="absolute left-0 top-full z-20 mt-1 max-w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-amber-400/35 bg-[#12182a]/98 px-3 py-2.5 text-left text-xs leading-relaxed text-amber-100/95 shadow-xl shadow-black/40"
+                role="tooltip"
+              >
+                ゴールドはショップでアイコンを囲むフレームやアイコンの購入などに使えます（準備中）。
+              </div>
+            )}
+          </div>
+
+          <Link
+            href="/shop"
+            className="inline-flex shrink-0 items-center justify-center rounded-full border border-amber-500/35 bg-[#12182a]/95 px-2.5 py-1.5 text-xs font-medium text-amber-100/90 shadow-sm backdrop-blur-sm transition hover:border-amber-400/55 sm:px-3 sm:py-2 sm:text-sm"
+          >
+            ショップ
+          </Link>
+
+          <MyRankStatus
+            weeklyRating={weeklyRating}
+            peakRating={peakRating}
+            loading={userProfileLoading}
+          />
+
+          <Link
+            href="/ranking"
+            className="inline-flex shrink-0 items-center justify-center rounded-full border border-[#ece5d8]/25 bg-[#12182a]/95 px-2.5 py-1.5 text-xs font-medium text-[#ece5d8] shadow-sm backdrop-blur-sm transition hover:border-[#ece5d8]/45 sm:px-3 sm:py-2 sm:text-sm"
+          >
+            ランキング
+          </Link>
+
           <button
             type="button"
-            onClick={() => setGoldHintOpen((o) => !o)}
-            className="flex items-center gap-1.5 rounded-full border border-amber-400/35 bg-[#12182a]/95 px-3 py-2 text-xs font-medium tabular-nums text-amber-100/95 shadow-lg backdrop-blur-sm transition hover:border-amber-400/55 sm:text-sm"
-            aria-expanded={goldHintOpen}
-            aria-label="ゴールド（説明を表示）"
+            onClick={() => {
+              setNameFieldTouched(false);
+              setNameModalOpen(true);
+            }}
+            className="shrink-0 rounded-full border border-[#ece5d8]/25 bg-[#12182a]/95 px-2.5 py-1.5 text-xs font-medium text-[#ece5d8] shadow-sm backdrop-blur-sm transition hover:border-[#ece5d8]/45 sm:px-3 sm:py-2 sm:text-sm"
           >
-            <GoldCoinIcon title="ゴールド" />
-            {totalGold === null
-              ? "…"
-              : Math.round(totalGold).toLocaleString("ja-JP")}
+            名前変更
           </button>
-          {goldHintOpen && (
-            <div
-              className="max-w-[min(20rem,calc(100vw-2rem))] rounded-xl border border-amber-400/35 bg-[#12182a]/98 px-3 py-2.5 text-left text-xs leading-relaxed text-amber-100/95 shadow-xl shadow-black/40"
-              role="tooltip"
-            >
-              ゴールドはショップでアイコンを囲むフレームやアイコンの購入などに使えます（準備中）。
-            </div>
-          )}
-        </div>
-      </div>
-      <div className="pointer-events-none fixed right-0 top-0 z-40 flex gap-2 px-4 pt-4 sm:px-6">
-        <Link
-          href="/ranking"
-          className={`pointer-events-auto rounded-full border border-[#ece5d8]/25 bg-[#12182a]/95 px-3 py-2 text-xs font-medium text-[#ece5d8] shadow-lg backdrop-blur-sm transition hover:border-[#ece5d8]/45 sm:text-sm`}
-        >
-          ランキング
-        </Link>
-        <Link
-          href="/shop"
-          className={`pointer-events-auto rounded-full border border-amber-500/35 bg-[#12182a]/95 px-3 py-2 text-xs font-medium text-amber-100/90 shadow-lg backdrop-blur-sm transition hover:border-amber-400/55 sm:text-sm`}
-        >
-          ショップ
-        </Link>
-        <button
-          type="button"
-          onClick={() => {
-            setNameFieldTouched(false);
-            setNameModalOpen(true);
-          }}
-          className="pointer-events-auto rounded-full border border-[#ece5d8]/25 bg-[#12182a]/95 px-3 py-2 text-xs font-medium text-[#ece5d8] shadow-lg backdrop-blur-sm transition hover:border-[#ece5d8]/45 sm:text-sm"
-        >
-          名前変更
-        </button>
-      </div>
+        </nav>
+      </header>
 
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-4 pb-16 pt-14 text-white">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pb-16 pt-4 text-white sm:gap-7 sm:pt-5">
         <header className="text-center">
           <p
             className={`text-xs font-medium uppercase tracking-[0.28em] text-[#ece5d8]/60`}
@@ -418,16 +469,16 @@ export default function Home() {
             GenshinGuesser
           </p>
           <h1
-            className={`mt-2 text-4xl font-semibold tracking-tight sm:text-5xl ${ACCENT}`}
+            className={`mt-1.5 text-3xl font-semibold tracking-tight sm:text-4xl ${ACCENT}`}
           >
             GenshinGuesser
           </h1>
 
-          <div className="mx-auto mt-5 max-w-lg text-left">
+          <div className="mx-auto mt-3 max-w-lg text-left sm:mt-4">
             <p className="text-center text-sm font-semibold tracking-wide text-[#ece5d8]">
               【遊び方ガイド】
             </p>
-            <ul className="mt-3 space-y-2.5 text-sm leading-relaxed text-white/72">
+            <ul className="mt-2 space-y-2 text-sm leading-relaxed text-white/72">
               <li className="flex gap-2">
                 <span className="shrink-0 select-none text-[#ece5d8]/55" aria-hidden>
                   ・
@@ -463,7 +514,7 @@ export default function Home() {
                   ・
                 </span>
                 <span>
-                  右上の
+                  画面上部の
                   <span className="font-semibold text-[#ece5d8]">「名前変更」</span>
                   から名前を登録して、
                   <span className="font-bold text-amber-200/95">世界ランキング</span>
@@ -471,7 +522,7 @@ export default function Home() {
                 </span>
               </li>
             </ul>
-            <p className="mt-4 text-center text-[0.8125rem] font-medium leading-snug text-amber-300/95 sm:text-sm">
+            <p className="mt-3 text-center text-[0.8125rem] font-medium leading-snug text-amber-300/95 sm:text-sm">
               ※クイズは既に始まっています。最初の1手を入力してください！
             </p>
           </div>

@@ -257,6 +257,14 @@ export async function POST(req: Request) {
             ? (userSnap.data()?.gold as number)
             : 0;
 
+        const prevPeakRaw = userSnap.exists()
+          ? userSnap.data()?.peakRating
+          : undefined;
+        const prevPeak =
+          typeof prevPeakRaw === "number" && Number.isFinite(prevPeakRaw)
+            ? prevPeakRaw
+            : undefined;
+
         let newRating: number;
         let ratingDelta: number;
         let eloActualScore: number;
@@ -289,10 +297,13 @@ export async function POST(req: Request) {
         const goldEarned = goldEarnedFromRatingDelta(ratingDelta);
         const goldTotal = goldBefore + goldEarned;
 
+        const nextPeakRating = Math.max(prevPeak ?? Rp, newRating);
+
         tx.set(
           userRef,
           {
             rating: newRating,
+            peakRating: nextPeakRating,
             games: gamesAfter,
             displayName,
             ratingWeekKey: currentWeekKey,

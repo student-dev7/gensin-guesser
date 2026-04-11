@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { DebugUserTools } from "@/components/DebugUserTools";
 import { FirebaseAnalyticsInit } from "@/components/FirebaseAnalyticsInit";
 import { LegalFooter } from "@/components/LegalFooter";
 import { SITE_URL } from "@/lib/site";
@@ -113,6 +114,7 @@ export default function RootLayout({
         />
         <div className="flex min-h-0 flex-1 flex-col">{children}</div>
         <LegalFooter />
+        <DebugUserTools />
         <FirebaseAnalyticsInit />
         <Analytics />
       </body>
