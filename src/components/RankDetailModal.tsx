@@ -8,20 +8,20 @@ import {
   getRankData,
   getRankLogoContentScale,
   getRankRangeTableRows,
-  getTierProgress,
+  getTierBarFromLifetimeRate,
 } from "@/lib/rankUtils";
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  /** 永続表示用レート（週次と peak の高い方） */
-  displayRating: number;
-  /** 今週のレート */
-  weeklyRating: number | null;
+  /** 累計レートに基づくランク表示（lifetime_total_rate） */
+  rankDisplayRating: number;
+  /** シーズン用レート current_rate */
+  seasonRating: number | null;
 };
 
 export function RankDetailModal(props: Props) {
-  const { open, onClose, displayRating, weeklyRating } = props;
+  const { open, onClose, rankDisplayRating, seasonRating } = props;
   const [logoOk, setLogoOk] = useState(true);
 
   useEffect(() => {
@@ -35,8 +35,8 @@ export function RankDetailModal(props: Props) {
 
   if (!open) return null;
 
-  const data = getRankData(displayRating);
-  const tier = getTierProgress(displayRating);
+  const data = getRankData(rankDisplayRating);
+  const tierBar = getTierBarFromLifetimeRate(rankDisplayRating);
   const accent = getRankAccentHex(data.rankId);
   const logoContentScale = getRankLogoContentScale(data.rankId);
   const rows = getRankRangeTableRows();
@@ -91,25 +91,53 @@ export function RankDetailModal(props: Props) {
               </section>
             )}
 
-            <section>
+            <section className="space-y-3">
               <p className="text-[0.7rem] font-medium tracking-wide text-white/45">
                 ポイント状況
               </p>
-              <p className="mt-1.5 text-sm leading-relaxed text-white/80">
-                {tier.isFinal ? (
-                  <span className="text-white/65">
-                    最終ランクのため、これ以上の昇格はありません。
-                  </span>
-                ) : (
-                  <>
+
+              {tierBar.isFinal ? (
+                <p className="text-sm leading-relaxed text-white/65">
+                  最終ランクのため、これ以上の昇格はありません。
+                </p>
+              ) : (
+                <>
+                  <div className="rounded-xl border border-[#ece5d8]/12 bg-[#0d1324]/80 px-3.5 py-3 sm:px-4">
+                    <div className="flex items-center justify-between gap-3 text-xs sm:text-sm">
+                      <span className="font-medium text-[#ece5d8]/75">
+                        現在のティア内の進捗
+                      </span>
+                      <span className="shrink-0 tabular-nums font-semibold text-[#ece5d8]">
+                        {tierBar.progressInTier} / {tierBar.tierSpan}
+                      </span>
+                    </div>
+                    <div
+                      className="mt-2.5 h-2.5 w-full overflow-hidden rounded-full bg-[#0a0f1e] shadow-inner shadow-black/40 ring-1 ring-[#ece5d8]/12"
+                      role="progressbar"
+                      aria-valuenow={tierBar.progressInTier}
+                      aria-valuemin={0}
+                      aria-valuemax={tierBar.tierSpan}
+                      aria-label="ティア内の進捗"
+                    >
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-emerald-600/90 via-emerald-500/85 to-amber-400/80 shadow-[0_0_12px_-2px_rgba(52,211,153,0.45)] transition-[width] duration-300"
+                        style={{
+                          width: `${Math.round(tierBar.fillRatio * 100)}%`,
+                          boxShadow: `inset 0 0 0 1px ${accent}44`,
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  <p className="text-sm leading-relaxed text-white/80">
                     昇格まであと{" "}
                     <span className="font-semibold tabular-nums text-[#ece5d8]">
-                      {tier.pointsToNext}
+                      {tierBar.pointsToNext}
                     </span>{" "}
-                    ポイント
-                  </>
-                )}
-              </p>
+                    ポイント（累計レートベース）
+                  </p>
+                </>
+              )}
             </section>
 
             <div className="flex flex-col items-center gap-3 border-y border-[#ece5d8]/10 py-6 text-center">
@@ -143,11 +171,11 @@ export function RankDetailModal(props: Props) {
               </div>
               <div className="w-full">
                 <p className="text-sm tabular-nums text-[#ece5d8]/90">
-                  表示レート: {Math.round(displayRating)}
+                  累計レート: {Math.round(rankDisplayRating)}
                 </p>
-                {weeklyRating != null && (
+                {seasonRating != null && (
                   <p className="mt-1 text-xs tabular-nums text-white/45">
-                    今週のレート: {Math.round(weeklyRating)}
+                    シーズンレート: {Math.round(seasonRating)}
                   </p>
                 )}
               </div>
@@ -159,17 +187,21 @@ export function RankDetailModal(props: Props) {
               </p>
               <ul className="mt-2.5 list-disc space-y-1.5 pl-4 text-[0.8125rem] leading-relaxed text-white/65 marker:text-white/35">
                 <li>
-                  レート帯ごとにランクがあり、各ランク内は{" "}
+                  <span className="font-medium text-white/80">累計レート</span>
+                  （試合の増減を積み上げた値）でランク帯が決まります。各帯内は{" "}
                   <span className="tabular-nums text-white/80">IV→III→II→I</span>{" "}
                   の順で上のティアへ昇格します。
                 </li>
                 <li>
-                  レートが次のティア（または次のランク帯）の下限に達すると、表示がひとつ上の段階に進みます。
+                  シーズン用のレートは毎週リセットされますが、累計レートは{" "}
+                  <span className="text-amber-200/90">リセットされません</span>。
                 </li>
                 <li>
-                  到達した最高ランクは、週次でレートが下がっても{" "}
-                  <span className="text-amber-200/90">表示上は降格しません</span>
-                  （永続ランク）。
+                  「あと◯ポイント」は累計レートから算出します。シーズンレートは対戦計算用で、ランク表示には使いません。
+                </li>
+                <li>
+                  ティア内の進捗は累計レートのみから計算します（ウォリアーは 1
+                  ティアあたり幅 30）。ランク帯ごとに幅は異なります。
                 </li>
               </ul>
             </section>
@@ -214,7 +246,7 @@ export function RankDetailModal(props: Props) {
             </section>
 
             <p className="rounded-xl border border-amber-400/25 bg-amber-950/25 px-3 py-2.5 text-xs leading-relaxed text-amber-100/85">
-              このランクは永続です。一度到達したランクから降格することはありません。
+              累計レートが下がればランク表示も下がり得ます。週次リセットで下がるのはシーズンレートだけです。
             </p>
           </div>
         </div>

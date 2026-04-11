@@ -45,7 +45,10 @@ service cloud.firestore {
         && request.resource.data.displayName.size() <= 12
         // serverTimestamp() 相当（クライアントが時刻を偽装できない）
         && request.resource.data.createdAt == request.time;
-      allow update, delete: if false;
+      allow update: if false;
+      // 自分が送ったメッセージのみ削除可（他人の分はサーバー管理が必要）
+      allow delete: if request.auth != null
+        && resource.data.uid == request.auth.uid;
     }
   }
 }

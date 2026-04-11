@@ -3,33 +3,29 @@
 import Image from "next/image";
 import { useState } from "react";
 import { RankDetailModal } from "@/components/RankDetailModal";
-import { DEFAULT_INITIAL_RATING } from "@/lib/elo";
 import {
-  getDisplayRating,
   getRankAccentHex,
   getRankData,
   getRankLogoContentScale,
+  rateForRankDisplay,
 } from "@/lib/rankUtils";
 
 type Props = {
-  /** 今週のレート（Firestore） */
-  weeklyRating: number | null;
-  /** 到達済み最高レート（未設定時は null） */
-  peakRating: number | null;
+  /** シーズン用レート current_rate（週次リセット対象） */
+  seasonRating: number | null;
+  /** 累計レート lifetime_total_rate（ランク・昇格表示の基準） */
+  lifetimeTotalRate: number | null;
   loading: boolean;
 };
 
 export function MyRankStatus(props: Props) {
-  const { weeklyRating, peakRating, loading } = props;
+  const { seasonRating, lifetimeTotalRate, loading } = props;
   const [modalOpen, setModalOpen] = useState(false);
   const [logoOk, setLogoOk] = useState(true);
 
-  const displayRate =
-    weeklyRating == null
-      ? DEFAULT_INITIAL_RATING
-      : getDisplayRating(weeklyRating, peakRating);
+  const rankRate = rateForRankDisplay(lifetimeTotalRate);
 
-  const data = getRankData(displayRate);
+  const data = getRankData(rankRate);
   const accent = getRankAccentHex(data.rankId);
   const logoScale = getRankLogoContentScale(data.rankId);
 
@@ -90,8 +86,8 @@ export function MyRankStatus(props: Props) {
       <RankDetailModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        displayRating={displayRate}
-        weeklyRating={weeklyRating}
+        rankDisplayRating={rankRate}
+        seasonRating={seasonRating}
       />
     </>
   );

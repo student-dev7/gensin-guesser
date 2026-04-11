@@ -27,9 +27,9 @@ function isDevLocalhostHost(hostname: string): boolean {
 export function DebugUserTools() {
   const [showUi, setShowUi] = useState(false);
   const [open, setOpen] = useState(false);
-  const [ratingDraft, setRatingDraft] = useState("");
+  const [seasonDraft, setSeasonDraft] = useState("");
+  const [lifetimeDraft, setLifetimeDraft] = useState("");
   const [goldDraft, setGoldDraft] = useState("");
-  const [peakDraft, setPeakDraft] = useState("");
   const [loadingDoc, setLoadingDoc] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -54,25 +54,30 @@ export function DebugUserTools() {
       const db = getFirestore(auth.app);
       const snap = await getDoc(doc(db, "users", uid));
       if (!snap.exists()) {
-        setRatingDraft(String(DEFAULT_INITIAL_RATING));
+        setSeasonDraft(String(DEFAULT_INITIAL_RATING));
+        setLifetimeDraft(String(DEFAULT_INITIAL_RATING));
         setGoldDraft("0");
-        setPeakDraft("");
         return;
       }
       const d = snap.data();
-      const r =
-        typeof d?.rating === "number" && Number.isFinite(d.rating)
-          ? d.rating
-          : DEFAULT_INITIAL_RATING;
+      const season =
+        typeof d?.current_rate === "number" && Number.isFinite(d.current_rate)
+          ? d.current_rate
+          : typeof d?.rating === "number" && Number.isFinite(d.rating)
+            ? d.rating
+            : DEFAULT_INITIAL_RATING;
+      const lifetime =
+        typeof d?.lifetime_total_rate === "number" &&
+        Number.isFinite(d.lifetime_total_rate)
+          ? d.lifetime_total_rate
+          : typeof d?.rating === "number" && Number.isFinite(d.rating)
+            ? d.rating
+            : DEFAULT_INITIAL_RATING;
       const g =
         typeof d?.gold === "number" && Number.isFinite(d.gold) ? d.gold : 0;
-      const p =
-        typeof d?.peakRating === "number" && Number.isFinite(d.peakRating)
-          ? d.peakRating
-          : r;
-      setRatingDraft(String(Math.round(r)));
+      setSeasonDraft(String(Math.round(season)));
+      setLifetimeDraft(String(Math.round(lifetime)));
       setGoldDraft(String(Math.round(g)));
-      setPeakDraft(String(Math.round(p)));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -97,30 +102,27 @@ export function DebugUserTools() {
         setError("未ログインです");
         return;
       }
-      const r = Number(ratingDraft);
+      const season = Number(seasonDraft);
+      const lifetime = Number(lifetimeDraft);
       const g = Number(goldDraft);
-      if (!Number.isFinite(r) || !Number.isFinite(g)) {
+      if (
+        !Number.isFinite(season) ||
+        !Number.isFinite(lifetime) ||
+        !Number.isFinite(g)
+      ) {
         setError("数値が不正です");
         return;
       }
-      let peak: number;
-      if (peakDraft.trim() === "") {
-        peak = r;
-      } else {
-        const p = Number(peakDraft);
-        if (!Number.isFinite(p)) {
-          setError("到達peakの数値が不正です");
-          return;
-        }
-        peak = p;
-      }
+      const cr = clampRating(season);
+      const lt = clampRating(lifetime);
       const db = getFirestore(auth.app);
       await setDoc(
         doc(db, "users", uid),
         {
-          rating: clampRating(r),
+          current_rate: cr,
+          lifetime_total_rate: lt,
+          rating: cr,
           gold: Math.max(0, g),
-          peakRating: clampRating(peak),
           updatedAt: serverTimestamp(),
         },
         { merge: true }
@@ -132,7 +134,7 @@ export function DebugUserTools() {
     } finally {
       setSaving(false);
     }
-  }, [ratingDraft, goldDraft, peakDraft]);
+  }, [seasonDraft, lifetimeDraft, goldDraft]);
 
   if (!showUi) return null;
 
@@ -180,12 +182,27 @@ export function DebugUserTools() {
 
             <div className="mt-4 space-y-3">
               <label className="block">
-                <span className="text-xs text-white/60">今週のレート</span>
+                <span className="text-xs text-white/60">
+                  シーズンレート（current_rate）
+                </span>
                 <input
                   type="number"
                   inputMode="numeric"
-                  value={ratingDraft}
-                  onChange={(e) => setRatingDraft(e.target.value)}
+                  value={seasonDraft}
+                  onChange={(e) => setSeasonDraft(e.target.value)}
+                  disabled={loadingDoc}
+                  className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm tabular-nums text-white outline-none focus:border-rose-400/50"
+                />
+              </label>
+              <label className="block">
+                <span className="text-xs text-white/60">
+                  累計レート（lifetime_total_rate）
+                </span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  value={lifetimeDraft}
+                  onChange={(e) => setLifetimeDraft(e.target.value)}
                   disabled={loadingDoc}
                   className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm tabular-nums text-white outline-none focus:border-rose-400/50"
                 />
@@ -199,20 +216,6 @@ export function DebugUserTools() {
                   onChange={(e) => setGoldDraft(e.target.value)}
                   disabled={loadingDoc}
                   className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm tabular-nums text-white outline-none focus:border-rose-400/50"
-                />
-              </label>
-              <label className="block">
-                <span className="text-xs text-white/60">
-                  到達 peak（永続ランク用・空欄で今週レートと同じ）
-                </span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={peakDraft}
-                  onChange={(e) => setPeakDraft(e.target.value)}
-                  disabled={loadingDoc}
-                  placeholder="空欄可"
-                  className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm tabular-nums text-white outline-none placeholder:text-white/30 focus:border-rose-400/50"
                 />
               </label>
             </div>

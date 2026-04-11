@@ -86,8 +86,12 @@ export default function Home() {
   const submitDoneRoundRef = useRef<string | null>(null);
   /** null = 読み込み中 */
   const [totalGold, setTotalGold] = useState<number | null>(null);
-  const [weeklyRating, setWeeklyRating] = useState<number | null>(null);
-  const [peakRating, setPeakRating] = useState<number | null>(null);
+  /** Firestore current_rate（シーズン・週次リセット対象） */
+  const [seasonRating, setSeasonRating] = useState<number | null>(null);
+  /** Firestore lifetime_total_rate（累計・ランク表示の基準） */
+  const [lifetimeTotalRate, setLifetimeTotalRate] = useState<number | null>(
+    null
+  );
   const [userProfileLoading, setUserProfileLoading] = useState(true);
   const [goldHintOpen, setGoldHintOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -100,8 +104,8 @@ export default function Home() {
       const uid = auth.currentUser?.uid;
       if (!uid) {
         setTotalGold(0);
-        setWeeklyRating(null);
-        setPeakRating(null);
+        setSeasonRating(null);
+        setLifetimeTotalRate(null);
         setUserProfileLoading(false);
         return;
       }
@@ -109,29 +113,34 @@ export default function Home() {
       const snap = await getDoc(doc(db, "users", uid));
       if (!snap.exists()) {
         setTotalGold(0);
-        setWeeklyRating(DEFAULT_INITIAL_RATING);
-        setPeakRating(null);
+        setSeasonRating(DEFAULT_INITIAL_RATING);
+        setLifetimeTotalRate(DEFAULT_INITIAL_RATING);
         setUserProfileLoading(false);
         return;
       }
       const d = snap.data();
       const g =
         typeof d?.gold === "number" && Number.isFinite(d.gold) ? d.gold : 0;
-      const r =
-        typeof d?.rating === "number" && Number.isFinite(d.rating)
-          ? d.rating
-          : DEFAULT_INITIAL_RATING;
-      const p =
-        typeof d?.peakRating === "number" && Number.isFinite(d.peakRating)
-          ? d.peakRating
-          : null;
+      const season =
+        typeof d?.current_rate === "number" && Number.isFinite(d.current_rate)
+          ? d.current_rate
+          : typeof d?.rating === "number" && Number.isFinite(d.rating)
+            ? d.rating
+            : DEFAULT_INITIAL_RATING;
+      const lifetime =
+        typeof d?.lifetime_total_rate === "number" &&
+        Number.isFinite(d.lifetime_total_rate)
+          ? d.lifetime_total_rate
+          : typeof d?.rating === "number" && Number.isFinite(d.rating)
+            ? d.rating
+            : DEFAULT_INITIAL_RATING;
       setTotalGold(g);
-      setWeeklyRating(r);
-      setPeakRating(p);
+      setSeasonRating(season);
+      setLifetimeTotalRate(lifetime);
     } catch {
       setTotalGold(0);
-      setWeeklyRating(DEFAULT_INITIAL_RATING);
-      setPeakRating(null);
+      setSeasonRating(DEFAULT_INITIAL_RATING);
+      setLifetimeTotalRate(DEFAULT_INITIAL_RATING);
     } finally {
       setUserProfileLoading(false);
     }
@@ -435,8 +444,8 @@ export default function Home() {
           </Link>
 
           <MyRankStatus
-            weeklyRating={weeklyRating}
-            peakRating={peakRating}
+            seasonRating={seasonRating}
+            lifetimeTotalRate={lifetimeTotalRate}
             loading={userProfileLoading}
           />
 

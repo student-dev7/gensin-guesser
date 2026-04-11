@@ -13,6 +13,7 @@ import {
 } from "@/lib/characterStats";
 import {
   applyWinRatingBonus,
+  clampRating,
   computeNewPlayerRating,
   DEFAULT_INITIAL_RATING,
   expectedScore,
@@ -37,6 +38,28 @@ type SubmitBody = {
 const LOSS_RECORD_HANDS = 7;
 const MAX_GUESSES_ROUND = 7;
 const MIN_GUESSES_TO_RESIGN = 4;
+
+function readSeasonRate(data: Record<string, unknown> | undefined): number {
+  if (!data) return DEFAULT_INITIAL_RATING;
+  const cr = data.current_rate;
+  if (typeof cr === "number" && Number.isFinite(cr)) return clampRating(cr);
+  const legacy = data.rating;
+  if (typeof legacy === "number" && Number.isFinite(legacy)) {
+    return clampRating(legacy);
+  }
+  return DEFAULT_INITIAL_RATING;
+}
+
+function readLifetimeTotal(data: Record<string, unknown> | undefined): number {
+  if (!data) return DEFAULT_INITIAL_RATING;
+  const lt = data.lifetime_total_rate;
+  if (typeof lt === "number" && Number.isFinite(lt)) return clampRating(lt);
+  const legacy = data.rating;
+  if (typeof legacy === "number" && Number.isFinite(legacy)) {
+    return clampRating(legacy);
+  }
+  return DEFAULT_INITIAL_RATING;
+}
 
 export async function POST(req: Request) {
   const body = (await req.json()) as SubmitBody;
@@ -230,16 +253,16 @@ export async function POST(req: Request) {
 
         const averageHandCount = bayesianMeanHands(totalHandCount, totalWins);
 
-        let Rp = userSnap.exists()
-          ? ((userSnap.data()?.rating as number | undefined) ??
-            DEFAULT_INITIAL_RATING)
-          : DEFAULT_INITIAL_RATING;
+        const userData = userSnap.exists()
+          ? (userSnap.data() as Record<string, unknown>)
+          : undefined;
+
+        let Rp = readSeasonRate(userData);
+        const lifetimeTotal = readLifetimeTotal(userData);
 
         let weeklyResetApplied = false;
         if (userSnap.exists()) {
-          const storedKey = userSnap.data()?.ratingWeekKey as
-            | string
-            | undefined;
+          const storedKey = userData?.ratingWeekKey as string | undefined;
           if (storedKey !== undefined && storedKey !== currentWeekKey) {
             Rp = DEFAULT_INITIAL_RATING;
             weeklyResetApplied = true;
@@ -256,14 +279,6 @@ export async function POST(req: Request) {
           Number.isFinite(userSnap.data()?.gold as number)
             ? (userSnap.data()?.gold as number)
             : 0;
-
-        const prevPeakRaw = userSnap.exists()
-          ? userSnap.data()?.peakRating
-          : undefined;
-        const prevPeak =
-          typeof prevPeakRaw === "number" && Number.isFinite(prevPeakRaw)
-            ? prevPeakRaw
-            : undefined;
 
         let newRating: number;
         let ratingDelta: number;
@@ -297,13 +312,14 @@ export async function POST(req: Request) {
         const goldEarned = goldEarnedFromRatingDelta(ratingDelta);
         const goldTotal = goldBefore + goldEarned;
 
-        const nextPeakRating = Math.max(prevPeak ?? Rp, newRating);
+        const newLifetimeTotal = clampRating(lifetimeTotal + ratingDelta);
 
         tx.set(
           userRef,
           {
+            current_rate: newRating,
+            lifetime_total_rate: newLifetimeTotal,
             rating: newRating,
-            peakRating: nextPeakRating,
             games: gamesAfter,
             displayName,
             ratingWeekKey: currentWeekKey,

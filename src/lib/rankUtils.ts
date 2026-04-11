@@ -1,13 +1,20 @@
-import { MIN_RATING } from "./elo";
+import { DEFAULT_INITIAL_RATING, MIN_RATING } from "./elo";
 
-/** ランク表示・ティア計算に使うレート（週次レートと peak の大きい方） */
-export function getDisplayRating(
-  currentRating: number,
-  peakRating: number | null | undefined
+/**
+ * 【ランク表示の基準：累計レート（lifetime_total_rate）】
+ * - 試合終了時のレート増減は、シーズン用の `current_rate` と、この累計の両方に加算される。
+ * - 毎週のリセットでは `current_rate` だけが基準値（例: 1500）に戻り、累計は維持される。
+ * - ランク帯・「次のランクまであと◯◯」は累計レートのみから算出する（シーズンレートは使わない）。
+ */
+
+/** ランク・昇格までの pt 表示に使う累計レート（未設定時は初期値） */
+export function rateForRankDisplay(
+  lifetimeTotalRate: number | null | undefined
 ): number {
-  const c = Number.isFinite(currentRating) ? currentRating : MIN_RATING;
-  if (peakRating == null || !Number.isFinite(peakRating)) return c;
-  return Math.max(c, peakRating);
+  if (lifetimeTotalRate == null || !Number.isFinite(lifetimeTotalRate)) {
+    return DEFAULT_INITIAL_RATING;
+  }
+  return lifetimeTotalRate;
 }
 
 export type RomanTier = "IV" | "III" | "II" | "I";
@@ -221,6 +228,76 @@ export function getTierProgress(rate: number): TierProgress {
     progressPercent,
     pointsToNext,
     isFinal: false,
+  };
+}
+
+/** 累計レートからティア内バー表示用（例: ウォリアーは幅 30 で「14 / 30」） */
+export type TierBarFromRate = {
+  /** 現在ティアの幅（RANK_BANDS の tierWidth。ウォリアーなら 30） */
+  tierSpan: number;
+  /**
+   * ティア下限からのオフセット（0 〜 tierSpan-1）。ティア下限で 0、上限付近で最大。
+   */
+  progressInTier: number;
+  /** バー塗りつぶし 0〜1 */
+  fillRatio: number;
+  pointsToNext: number;
+  isFinal: boolean;
+};
+
+/**
+ * 累計レートを基準に、現在ティア内の進捗（分母はその帯の tierWidth）と昇格までの pt を返す。
+ */
+export function getTierBarFromLifetimeRate(lifetimeRate: number): TierBarFromRate {
+  const r = clampRate(lifetimeRate);
+
+  if (r >= MYTHIC_GLORY_MIN) {
+    return {
+      tierSpan: 0,
+      progressInTier: 0,
+      fillRatio: 1,
+      pointsToNext: 0,
+      isFinal: true,
+    };
+  }
+
+  let band: RankBand;
+  let low: number;
+  let high: number;
+  let w: number;
+
+  if (r < 1500) {
+    band = RANK_BANDS[0]!;
+    w = band.tierWidth;
+    ({ low, high } = tierBoundsInBand(band, "IV"));
+  } else {
+    band =
+      RANK_BANDS.find((b) => r >= b.min && r <= b.max) ?? RANK_BANDS[0]!;
+    w = band.tierWidth;
+    const idx = Math.min(3, Math.max(0, Math.floor((r - band.min) / w)));
+    const tierRoman = ROMAN_BY_INDEX[idx]!;
+    ({ low, high } = tierBoundsInBand(band, tierRoman));
+  }
+
+  const rInt = Math.floor(r);
+  const offsetFromLow =
+    rInt < low ? 0 : Math.min(w - 1, Math.max(0, rInt - low));
+  const progressInTier = w <= 1 ? 0 : offsetFromLow;
+  const fillRatio =
+    w <= 1
+      ? rInt >= low && rInt <= high
+        ? 1
+        : 0
+      : Math.min(1, Math.max(0, (rInt - low) / (w - 1)));
+
+  const tp = getTierProgress(lifetimeRate);
+
+  return {
+    tierSpan: w,
+    progressInTier,
+    fillRatio,
+    pointsToNext: tp.pointsToNext,
+    isFinal: tp.isFinal,
   };
 }
 

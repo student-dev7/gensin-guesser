@@ -10,6 +10,8 @@ import {
 import {
   addDoc,
   collection,
+  deleteDoc,
+  doc,
   getFirestore,
   limit,
   onSnapshot,
@@ -26,10 +28,11 @@ import { validateDisplayName } from "../lib/validateDisplayName";
 
 const CHAT_COLLECTION = "chat_messages";
 const CHAT_MESSAGE_MAX = 80;
+/** 保持・表示する最大件数（古いものから削除） */
+const MAX_CHAT_MESSAGES = 15;
 /** 無操作でリスナーを外す（分） */
 const IDLE_MINUTES = 4;
 const IDLE_MS = IDLE_MINUTES * 60 * 1000;
-const PAGE_SIZE = 50;
 
 export type ChatMessageRow = {
   id: string;
@@ -73,6 +76,8 @@ export function ChatRoomPanel(props: {
   const [connected, setConnected] = useState(false);
   const [listenIdle, setListenIdle] = useState(false);
   const [reconnectKey, setReconnectKey] = useState(0);
+  const [myUid, setMyUid] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const unsubRef = useRef<(() => void) | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -119,11 +124,12 @@ export function ChatRoomPanel(props: {
         await ensureAnonymousSession();
         if (cancelled) return;
         const auth = getFirebaseAuth();
+        setMyUid(auth.currentUser?.uid ?? null);
         const db = getFirestore(auth.app);
         const q = query(
           collection(db, CHAT_COLLECTION),
           orderBy("createdAt", "desc"),
-          limit(PAGE_SIZE)
+          limit(MAX_CHAT_MESSAGES)
         );
         const unsub = onSnapshot(
           q,
@@ -219,6 +225,32 @@ export function ChatRoomPanel(props: {
     setReconnectKey((k) => k + 1);
   }, []);
 
+  const deleteMessage = useCallback(
+    async (messageId: string, authorUid: string) => {
+      if (!messageId || deletingId) return;
+      if (!myUid || authorUid !== myUid) return;
+      setDeletingId(messageId);
+      setError(null);
+      try {
+        await ensureAnonymousSession();
+        const auth = getFirebaseAuth();
+        const uid = auth.currentUser?.uid;
+        if (!uid || uid !== authorUid) {
+          setError("削除できませんでした");
+          return;
+        }
+        const db = getFirestore(auth.app);
+        await deleteDoc(doc(db, CHAT_COLLECTION, messageId));
+        bumpActivity();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setDeletingId(null);
+      }
+    },
+    [myUid, deletingId, bumpActivity]
+  );
+
   return (
     <div
       className="fixed inset-0 z-[115] flex items-end justify-center bg-black/55 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-[2px] sm:items-center sm:p-4"
@@ -295,9 +327,21 @@ export function ChatRoomPanel(props: {
                 <span className="font-medium text-[#ece5d8]/95">
                   {m.displayName}
                 </span>
-                <span className="text-[0.65rem] tabular-nums text-white/40">
-                  {formatChatSentAt(m.createdAt)}
-                </span>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="text-[0.65rem] tabular-nums text-white/40">
+                    {formatChatSentAt(m.createdAt)}
+                  </span>
+                  {myUid != null && m.uid === myUid && (
+                    <button
+                      type="button"
+                      onClick={() => void deleteMessage(m.id, m.uid)}
+                      disabled={deletingId === m.id}
+                      className="rounded-md px-1.5 py-0.5 text-[0.65rem] font-medium text-rose-300/90 transition hover:bg-rose-950/60 hover:text-rose-200 disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      {deletingId === m.id ? "…" : "削除"}
+                    </button>
+                  )}
+                </div>
               </div>
               <p className="mt-1 whitespace-pre-wrap break-words text-white/88">
                 {m.text}
@@ -346,7 +390,8 @@ export function ChatRoomPanel(props: {
           </div>
           <p className="mt-1.5 text-[0.65rem] text-white/40">
             表示名は「名前変更」で登録した名前（未登録は「旅人」）。最大
-            {CHAT_MESSAGE_MAX}文字。
+            {CHAT_MESSAGE_MAX}
+            文字。表示は直近 {MAX_CHAT_MESSAGES} 件までです。
           </p>
         </div>
       </div>
