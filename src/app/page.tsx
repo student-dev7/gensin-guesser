@@ -404,10 +404,7 @@ export default function Home() {
           className="mx-auto flex w-full max-w-4xl flex-wrap items-center gap-x-2 gap-y-2 sm:gap-x-3"
           aria-label="メインナビゲーション"
         >
-          <div
-            ref={goldBarRef}
-            className="relative flex shrink-0 flex-col items-start gap-1.5"
-          >
+          <div ref={goldBarRef} className="relative flex shrink-0">
             <button
               type="button"
               onClick={() => setGoldHintOpen((o) => !o)}
@@ -428,14 +425,6 @@ export default function Home() {
                 ゴールドはショップでアイコンを囲むフレームやアイコンの購入などに使えます（準備中）。
               </div>
             )}
-            <button
-              type="button"
-              onClick={() => setChatOpen(true)}
-              className="w-full rounded-full border border-sky-400/35 bg-[#12182a]/95 px-2.5 py-1.5 text-left text-xs font-medium text-sky-100/95 shadow-sm backdrop-blur-sm transition hover:border-sky-400/55 sm:px-3 sm:py-2 sm:text-sm"
-              aria-haspopup="dialog"
-            >
-              チャットを開く
-            </button>
           </div>
 
           <Link
@@ -593,20 +582,30 @@ export default function Home() {
           )}
 
           {!finished && (
-            <div className="mt-3 flex flex-col items-end gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <div className="mt-3 flex w-full flex-col gap-2">
               {!canResign && (
-                <p className="order-2 max-w-full text-right text-xs text-white/50 sm:order-1 sm:mr-auto sm:text-left">
+                <p className="max-w-full text-right text-xs text-white/50 sm:text-left">
                   4回予想してから諦められます
                 </p>
               )}
-              <button
-                type="button"
-                onClick={resign}
-                disabled={!canResign}
-                className="order-1 rounded-xl border border-[#ece5d8]/25 bg-[#12182a]/80 px-4 py-2 text-sm font-medium text-[#ece5d8] transition hover:bg-[#1a2238] disabled:cursor-not-allowed disabled:opacity-45 sm:order-2"
-              >
-                諦める
-              </button>
+              <div className="flex w-full min-w-0 items-center justify-between gap-4">
+                <button
+                  type="button"
+                  onClick={() => setChatOpen(true)}
+                  className="shrink-0 rounded-xl border border-sky-400/35 bg-[#12182a]/80 px-4 py-2 text-sm font-medium text-sky-100/95 transition hover:border-sky-400/55 hover:bg-[#1a2238]"
+                  aria-haspopup="dialog"
+                >
+                  チャット
+                </button>
+                <button
+                  type="button"
+                  onClick={resign}
+                  disabled={!canResign}
+                  className="shrink-0 rounded-xl border border-[#ece5d8]/25 bg-[#12182a]/80 px-4 py-2 text-sm font-medium text-[#ece5d8] transition hover:bg-[#1a2238] disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  諦める
+                </button>
+              </div>
             </div>
           )}
         </section>
