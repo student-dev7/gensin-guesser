@@ -22,6 +22,8 @@ const MAX_GUESSES = 7;
 /** これ未満では降参不可（API の MIN と一致） */
 const MIN_GUESSES_TO_RESIGN = 4;
 const PLAYER_NAME_KEY = "genshin-guesser-player-name";
+/** 対戦（ゴーストあり） / 個人（ゴーストなし） */
+const BATTLE_MODE_KEY = "genshin-guesser-battle-mode";
 const ACCENT = "text-[#ece5d8]";
 
 function normalizeForSearch(s: string) {
@@ -111,6 +113,13 @@ export default function Home() {
   const [ghost, setGhost] = useState<GhostInfo | null>(null);
   const [ghostEcho, setGhostEcho] = useState<string | null>(null);
   const ghostToastShownRef = useRef(false);
+  /** true = 対戦モード（ゴースト） / false = 個人モード */
+  const [battleModeVs, setBattleModeVs] = useState(true);
+  const [patchNotesOpen, setPatchNotesOpen] = useState(false);
+  /** パッチノート第2層: どの題名を開いているか */
+  const [patchSection, setPatchSection] = useState<
+    "battle" | "stats" | "rate" | null
+  >(null);
 
   const syncUserProfile = useCallback(async () => {
     try {
@@ -187,12 +196,33 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    try {
+      const v = localStorage.getItem(BATTLE_MODE_KEY);
+      if (v === "solo") setBattleModeVs(false);
+      else if (v === "vs") setBattleModeVs(true);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(BATTLE_MODE_KEY, battleModeVs ? "vs" : "solo");
+    } catch {
+      /* ignore */
+    }
+  }, [battleModeVs]);
+
+  useEffect(() => {
     setDebugHost(isDevLocalhostHost(window.location.hostname));
   }, []);
 
   useEffect(() => {
     setGhost(null);
     ghostToastShownRef.current = false;
+    if (!battleModeVs) {
+      return;
+    }
     let cancelled = false;
     void (async () => {
       try {
@@ -216,7 +246,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, [target.name, roundId]);
+  }, [target.name, roundId, battleModeVs]);
 
   useEffect(() => {
     if (!ghost) return;
@@ -264,6 +294,7 @@ export default function Home() {
 
   const won = guesses.some((g) => g.name === target.name);
   const lostToGhost =
+    battleModeVs &&
     ghost !== null &&
     !won &&
     guesses.length > ghost.handCount;
@@ -361,8 +392,9 @@ export default function Home() {
             won,
             displayName: nameCheck.name,
             surrendered,
-            ...(ghost ? { ghostRunId: ghost.ghostRunId } : {}),
-            ...(lostToGhost ? { lostToGhost: true } : {}),
+            ...(!battleModeVs ? { personalMode: true } : {}),
+            ...(battleModeVs && ghost ? { ghostRunId: ghost.ghostRunId } : {}),
+            ...(battleModeVs && lostToGhost ? { lostToGhost: true } : {}),
           }),
         });
 
@@ -445,6 +477,7 @@ export default function Home() {
     submitRetryKey,
     ghost,
     lostToGhost,
+    battleModeVs,
   ]);
 
   const goNextRound = useCallback(() => {
@@ -611,119 +644,204 @@ export default function Home() {
               </li>
             </ul>
 
-            <details className="mt-4 rounded-xl border border-amber-500/30 bg-[#0d1324]/85 px-3 py-2.5 text-left sm:px-4 sm:py-3">
-              <summary className="cursor-pointer list-none text-center text-sm font-semibold text-amber-200/95 [&::-webkit-details-marker]:hidden">
-                <span className="underline decoration-amber-500/40 underline-offset-2">
-                  パッチノート
-                </span>
-              </summary>
-              <div className="mt-3 space-y-2.5 border-t border-[#ece5d8]/10 pt-3 text-sm leading-relaxed text-white/72">
-                <p>
-                  対戦の基準を、
-                  <span className="font-semibold text-[#ece5d8]">
-                    過去のクリア記録から選ばれるゴースト
-                  </span>
-                  との比較に切り替えました（従来の「平均手数ボーナス」に加え、ゴーストとの差もレートに反映されます）。
-                  キャラ別の参考平均手数はベイズではなく
-                  <span className="font-medium text-[#ece5d8]">全プレイの単純平均</span>
-                  です（勝ち・負け・ゴースト敗北を含み、
-                  <span className="font-medium text-[#ece5d8]">降参は 7 手</span>
-                  として計上）。
-                </p>
-                <ul className="list-disc space-y-1.5 pl-4 marker:text-amber-400/80">
-                  <li>
-                    各ラウンド開始時に、そのお題キャラで過去に正解したプレイから1件がゴーストとして選ばれます（表示名・手数）。
-                  </li>
-                  <li>
-                    ゴーストが正解したのと同じ手数に達したタイミングで、ゴースト側の正解が通知されます。
-                  </li>
-                  <li>
-                    まだ自分が正解していない状態で、ゴーストの正解手数を
-                    <span className="font-medium text-[#ece5d8]">超えた</span>
-                    時点で
-                    <span className="font-medium text-rose-300/90">敗北</span>
-                    です。同じ手数の時点ではまだ続行できます。
-                  </li>
-                  <li>
-                    正解すればクリアでレートは勝ち更新です。未正解のままゴーストの手数を超えたときだけ敗北し、それまでは予想を続けられます。ゴーストより少ない手数で当てるほどレートボーナスが増えます。
-                  </li>
-                  <li>
-                    累計レート（
-                    <span className="font-medium text-[#ece5d8]">lifetime_total_rate</span>
-                    ）の上限を
-                    <span className="tabular-nums font-medium text-amber-200/95">9999</span>
-                    に引き上げました（週次レートの上限は従来どおりです）。
-                  </li>
-                </ul>
-
-                <div className="mt-4 rounded-lg border border-[#ece5d8]/15 bg-[#0a0f1e]/80 px-3 py-2.5 text-[0.8125rem] leading-relaxed sm:text-sm">
-                  <p className="font-semibold text-[#ece5d8]">
-                    レート変動の目安（キャラ平均手数がちょうど 4 手のとき）
-                  </p>
-                  <p className="mt-1.5 text-white/65">
-                    週次レートの「勝ち」は{" "}
-                    <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
-                      +5 + max(0, 平均−自分の手数)×2
-                    </span>
-                    （＋ゴーストがいる場合はさらに{" "}
-                    <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
-                      max(0, ゴースト手数−自分の手数)×2
-                    </span>
-                    ）。平均が 4 のときの増分だけ抜き出すと次のとおりです。
-                  </p>
-                  <div className="mt-2 overflow-x-auto">
-                    <table className="w-full min-w-[16rem] border-collapse text-left text-[0.8125rem] tabular-nums sm:text-sm">
-                      <thead>
-                        <tr className="border-b border-[#ece5d8]/20 text-[#ece5d8]/90">
-                          <th className="py-1 pr-3 font-medium">正解までの手数</th>
-                          <th className="py-1 font-medium">週次レート増分（勝ち）</th>
-                        </tr>
-                      </thead>
-                      <tbody className="text-white/80">
-                        <tr className="border-b border-white/5">
-                          <td className="py-1 pr-3">1</td>
-                          <td className="text-emerald-200/95">+11</td>
-                        </tr>
-                        <tr className="border-b border-white/5">
-                          <td className="py-1 pr-3">2</td>
-                          <td className="text-emerald-200/95">+9</td>
-                        </tr>
-                        <tr className="border-b border-white/5">
-                          <td className="py-1 pr-3">3</td>
-                          <td className="text-emerald-200/95">+7</td>
-                        </tr>
-                        <tr className="border-b border-white/5">
-                          <td className="py-1 pr-3">4</td>
-                          <td className="text-emerald-200/95">+5</td>
-                        </tr>
-                        <tr className="border-b border-white/5">
-                          <td className="py-1 pr-3">5〜7</td>
-                          <td className="text-emerald-200/95">+5（平均より遅いので速度ボーナスなし）</td>
-                        </tr>
-                      </tbody>
-                    </table>
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setPatchNotesOpen((o) => {
+                    const next = !o;
+                    if (!next) setPatchSection(null);
+                    return next;
+                  });
+                }}
+                className="w-full rounded-xl border border-amber-500/30 bg-[#0d1324]/85 px-3 py-2.5 text-center text-sm font-semibold text-amber-200/95 transition hover:border-amber-500/50 sm:px-4 sm:py-3"
+                aria-expanded={patchNotesOpen}
+              >
+                パッチノート
+              </button>
+              {patchNotesOpen && (
+                <div className="mt-3 space-y-2 rounded-xl border border-amber-500/20 bg-[#0d1324]/85 px-2 py-2 text-sm sm:px-3">
+                  <div className="border-b border-[#ece5d8]/10 pb-2 last:border-b-0 last:pb-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPatchSection((s) => (s === "battle" ? null : "battle"))
+                      }
+                      className="w-full rounded-lg px-2 py-2 text-left text-sm font-semibold text-amber-200/95 transition hover:bg-white/[0.06]"
+                      aria-expanded={patchSection === "battle"}
+                    >
+                      対戦方式の変更について
+                    </button>
+                    {patchSection === "battle" && (
+                      <div className="space-y-2.5 border-t border-[#ece5d8]/10 px-2 pb-2 pt-3 leading-relaxed text-white/72">
+                        <p>
+                          対戦の基準を、
+                          <span className="font-semibold text-[#ece5d8]">
+                            過去のクリア記録から選ばれるゴースト
+                          </span>
+                          との比較に切り替えました（従来の「平均手数ボーナス」に加え、ゴーストとの差もレートに反映されます）。
+                        </p>
+                        <ul className="list-disc space-y-1.5 pl-4 marker:text-amber-400/80">
+                          <li>
+                            各ラウンドで対戦モードのとき、そのお題キャラの過去正解から1件がゴーストとして選ばれます（表示名・手数）。1〜2
+                            手だけの正解記録はゴーストに使いません。
+                          </li>
+                          <li>
+                            ゴーストが正解したのと同じ手数に達したタイミングで、ゴースト側の正解が通知されます。
+                          </li>
+                          <li>
+                            まだ自分が正解していない状態で、ゴーストの正解手数を
+                            <span className="font-medium text-[#ece5d8]">超えた</span>
+                            時点で
+                            <span className="font-medium text-rose-300/90">敗北</span>
+                            です。同じ手数の時点ではまだ続行できます。
+                          </li>
+                          <li>
+                            正解すればクリアで週次レートは勝ち更新です。未正解のままゴーストの手数を超えたときだけ敗北し、それまでは予想を続けられます。ゴーストより少ない手数で当てるほどボーナスが増えます。
+                          </li>
+                          <li>
+                            <span className="font-medium text-[#ece5d8]">個人モード</span>
+                            ではゴーストは出ず、
+                            <span className="font-medium text-amber-200/90">
+                              週次・累計レート・ゴールドは一切変動しません
+                            </span>
+                            （練習向け）。
+                          </li>
+                        </ul>
+                      </div>
+                    )}
                   </div>
-                  <p className="mt-3 text-white/65">
-                    <span className="font-semibold text-rose-300/90">負け</span>
-                    （不正解・降参・手数切れ・ゴースト敗北など）の週次レート減少は、
-                    <span className="font-medium text-[#ece5d8]">
-                      そのラウンドで何手使ったかではなく
-                    </span>
-                    、いまのシーズンレートと期待勝率{" "}
-                    <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">E</span>{" "}
-                    だけで決まります（手数 1〜7 で式は同じ）。相手レート 1500・自分の週次レートが 1500 のときは{" "}
-                    <span className="tabular-nums text-rose-200/95">約 −16</span>
-                    、2000 のときは{" "}
-                    <span className="tabular-nums text-rose-200/95">約 −30</span>
-                    （いずれも{" "}
-                    <span className="font-mono text-[0.65rem] text-white/70 sm:text-xs">
-                      K=32
-                    </span>
-                    ・上限クリップ前）。
-                  </p>
+
+                  <div className="border-b border-[#ece5d8]/10 pb-2 last:border-b-0 last:pb-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPatchSection((s) => (s === "stats" ? null : "stats"))
+                      }
+                      className="w-full rounded-lg px-2 py-2 text-left text-sm font-semibold text-amber-200/95 transition hover:bg-white/[0.06]"
+                      aria-expanded={patchSection === "stats"}
+                    >
+                      キャラ統計・累計レートについて
+                    </button>
+                    {patchSection === "stats" && (
+                      <div className="space-y-2.5 border-t border-[#ece5d8]/10 px-2 pb-2 pt-3 leading-relaxed text-white/72">
+                        <p>
+                          キャラ別の参考平均手数は
+                          <span className="font-medium text-[#ece5d8]">
+                            全プレイの単純平均
+                          </span>
+                          です（勝ち・負け・ゴースト敗北を含み、
+                          <span className="font-medium text-[#ece5d8]">降参は 7 手</span>
+                          として計上）。
+                        </p>
+                        <p>
+                          <span className="font-semibold text-[#ece5d8]">
+                            累計レート（lifetime_total_rate）
+                          </span>
+                          は敗北や週次の減点では
+                          <span className="font-medium text-emerald-200/90">減りません</span>
+                          。勝ちで増えた分だけ上がります（ランク表示の基準）。上限は
+                          <span className="tabular-nums font-medium text-amber-200/95">
+                            9999
+                          </span>
+                          です。週次レートの上限は従来どおりです。
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pb-0">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPatchSection((s) => (s === "rate" ? null : "rate"))
+                      }
+                      className="w-full rounded-lg px-2 py-2 text-left text-sm font-semibold text-amber-200/95 transition hover:bg-white/[0.06]"
+                      aria-expanded={patchSection === "rate"}
+                    >
+                      レート増減の目安
+                    </button>
+                    {patchSection === "rate" && (
+                      <div className="mt-2 border-t border-[#ece5d8]/10 px-2 pb-2 pt-3 text-[0.8125rem] leading-relaxed text-white/72 sm:text-sm">
+                        <p className="font-semibold text-[#ece5d8]">
+                          キャラ平均手数がちょうど 4 手のとき
+                        </p>
+                        <p className="mt-1.5 text-white/65">
+                          週次レートの「勝ち」は{" "}
+                          <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
+                            +5 + max(0, 平均−自分の手数)×2
+                          </span>
+                          （＋ゴーストがいる場合はさらに{" "}
+                          <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
+                            max(0, ゴースト手数−自分の手数)×2
+                          </span>
+                          ）。平均が 4 のときの増分だけ抜き出すと次のとおりです。
+                        </p>
+                        <div className="mt-2 overflow-x-auto">
+                          <table className="w-full min-w-[16rem] border-collapse text-left text-[0.8125rem] tabular-nums sm:text-sm">
+                            <thead>
+                              <tr className="border-b border-[#ece5d8]/20 text-[#ece5d8]/90">
+                                <th className="py-1 pr-3 font-medium">
+                                  正解までの手数
+                                </th>
+                                <th className="py-1 font-medium">
+                                  週次レート増分（勝ち）
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="text-white/80">
+                              <tr className="border-b border-white/5">
+                                <td className="py-1 pr-3">1</td>
+                                <td className="text-emerald-200/95">+11</td>
+                              </tr>
+                              <tr className="border-b border-white/5">
+                                <td className="py-1 pr-3">2</td>
+                                <td className="text-emerald-200/95">+9</td>
+                              </tr>
+                              <tr className="border-b border-white/5">
+                                <td className="py-1 pr-3">3</td>
+                                <td className="text-emerald-200/95">+7</td>
+                              </tr>
+                              <tr className="border-b border-white/5">
+                                <td className="py-1 pr-3">4</td>
+                                <td className="text-emerald-200/95">+5</td>
+                              </tr>
+                              <tr className="border-b border-white/5">
+                                <td className="py-1 pr-3">5〜7</td>
+                                <td className="text-emerald-200/95">
+                                  +5（平均より遅いので速度ボーナスなし）
+                                </td>
+                              </tr>
+                            </tbody>
+                          </table>
+                        </div>
+                        <p className="mt-3 text-white/65">
+                          <span className="font-semibold text-rose-300/90">負け</span>
+                          （不正解・降参・手数切れ・ゴースト敗北など）の週次レート減少は、
+                          <span className="font-medium text-[#ece5d8]">
+                            そのラウンドで何手使ったかではなく
+                          </span>
+                          、いまのシーズンレートと期待勝率{" "}
+                          <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
+                            E
+                          </span>{" "}
+                          だけで決まります（手数 1〜7 で式は同じ）。相手レート 1500・自分の週次レートが
+                          1500 のときは{" "}
+                          <span className="tabular-nums text-rose-200/95">約 −16</span>
+                          、2000 のときは{" "}
+                          <span className="tabular-nums text-rose-200/95">約 −30</span>
+                          （いずれも{" "}
+                          <span className="font-mono text-[0.65rem] text-white/70 sm:text-xs">
+                            K=32
+                          </span>
+                          ・上限クリップ前）。
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            </details>
+              )}
+            </div>
 
             <p className="mt-3 text-center text-[0.8125rem] font-medium leading-snug text-amber-300/95 sm:text-sm">
               ※クイズは既に始まっています。最初の1手を入力してください！
@@ -810,20 +928,52 @@ export default function Home() {
                   4回予想してから諦められます
                 </p>
               )}
-              <div className="flex w-full min-w-0 items-center justify-between gap-4">
+              <div className="flex w-full min-w-0 items-center justify-between gap-2 sm:gap-3">
                 <button
                   type="button"
                   onClick={() => setChatOpen(true)}
-                  className="shrink-0 rounded-xl border border-sky-400/35 bg-[#12182a]/80 px-4 py-2 text-sm font-medium text-sky-100/95 transition hover:border-sky-400/55 hover:bg-[#1a2238]"
+                  className="shrink-0 rounded-xl border border-sky-400/35 bg-[#12182a]/80 px-3 py-2 text-sm font-medium text-sky-100/95 transition hover:border-sky-400/55 hover:bg-[#1a2238] sm:px-4"
                   aria-haspopup="dialog"
                 >
                   チャット
                 </button>
+                {guesses.length === 0 && (
+                  <div
+                    className="flex min-w-0 flex-1 justify-center px-1"
+                    role="group"
+                    aria-label="対戦モードと個人モードの切り替え"
+                  >
+                    <div className="inline-flex rounded-xl border border-[#ece5d8]/25 bg-[#0a0f1e]/90 p-0.5">
+                      <button
+                        type="button"
+                        onClick={() => setBattleModeVs(true)}
+                        className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition sm:px-3 sm:text-sm ${
+                          battleModeVs
+                            ? "bg-[#ece5d8]/15 text-[#ece5d8]"
+                            : "text-white/45 hover:text-white/70"
+                        }`}
+                      >
+                        対戦
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setBattleModeVs(false)}
+                        className={`rounded-lg px-2.5 py-1.5 text-xs font-medium transition sm:px-3 sm:text-sm ${
+                          !battleModeVs
+                            ? "bg-[#ece5d8]/15 text-[#ece5d8]"
+                            : "text-white/45 hover:text-white/70"
+                        }`}
+                      >
+                        個人
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={resign}
                   disabled={!canResign}
-                  className="shrink-0 rounded-xl border border-[#ece5d8]/25 bg-[#12182a]/80 px-4 py-2 text-sm font-medium text-[#ece5d8] transition hover:bg-[#1a2238] disabled:cursor-not-allowed disabled:opacity-45"
+                  className="shrink-0 rounded-xl border border-[#ece5d8]/25 bg-[#12182a]/80 px-3 py-2 text-sm font-medium text-[#ece5d8] transition hover:bg-[#1a2238] disabled:cursor-not-allowed disabled:opacity-45 sm:px-4"
                 >
                   諦める
                 </button>

@@ -11,6 +11,8 @@ import { NextResponse } from "next/server";
 import { getPublicFirestore } from "@/lib/firebasePublicFirestore";
 
 const RUNS_SAMPLE_LIMIT = 200;
+/** 1〜2 手正解の記録はゴーストに使わない */
+const MIN_GHOST_WIN_HANDS = 3;
 
 function fallbackName(uid: string) {
   return `GenshinUser_${uid.slice(0, 8)}`;
@@ -39,8 +41,13 @@ export async function GET(req: Request) {
     );
     const snap = await getDocs(q);
     const winDocs = snap.docs.filter((d) => {
-      const w = d.data() as { won?: unknown };
-      return w.won === true;
+      const w = d.data() as { won?: unknown; handCount?: unknown };
+      if (w.won !== true) return false;
+      const hc =
+        typeof w.handCount === "number" && Number.isFinite(w.handCount)
+          ? Math.round(w.handCount)
+          : 0;
+      return hc >= MIN_GHOST_WIN_HANDS;
     });
     if (winDocs.length === 0) {
       return NextResponse.json({ ok: true, ghost: null });

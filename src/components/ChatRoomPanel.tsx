@@ -12,6 +12,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
   getFirestore,
   limit,
   onSnapshot,
@@ -24,6 +25,8 @@ import {
   ensureAnonymousSession,
   getFirebaseAuth,
 } from "../lib/firebaseClient";
+import { DEFAULT_INITIAL_RATING } from "../lib/elo";
+import { formatRankTierLine, getRankData } from "../lib/rankUtils";
 import { validateDisplayName } from "../lib/validateDisplayName";
 
 const CHAT_COLLECTION = "chat_messages";
@@ -78,6 +81,9 @@ export function ChatRoomPanel(props: {
   const [reconnectKey, setReconnectKey] = useState(0);
   const [myUid, setMyUid] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  /** uid → 累計レート由来のランク表示ラベル（再レンダー用に tick と併用） */
+  const rankLabelRef = useRef<Record<string, string>>({});
+  const [rankLabelsTick, setRankLabelsTick] = useState(0);
 
   const unsubRef = useRef<(() => void) | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -176,6 +182,56 @@ export function ChatRoomPanel(props: {
     };
   }, [reconnectKey]);
 
+  useEffect(() => {
+    const uids = [
+      ...new Set(messages.map((m) => m.uid).filter((u) => u.length > 0)),
+    ];
+    const missing = uids.filter((uid) => rankLabelRef.current[uid] === undefined);
+    if (missing.length === 0) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const auth = getFirebaseAuth();
+        const db = getFirestore(auth.app);
+        await Promise.all(
+          missing.map(async (uid) => {
+            try {
+              const snap = await getDoc(doc(db, "users", uid));
+              let lt = DEFAULT_INITIAL_RATING;
+              if (snap.exists()) {
+                const d = snap.data() as {
+                  lifetime_total_rate?: unknown;
+                  rating?: unknown;
+                };
+                if (
+                  typeof d.lifetime_total_rate === "number" &&
+                  Number.isFinite(d.lifetime_total_rate)
+                ) {
+                  lt = d.lifetime_total_rate;
+                } else if (
+                  typeof d.rating === "number" &&
+                  Number.isFinite(d.rating)
+                ) {
+                  lt = d.rating;
+                }
+              }
+              rankLabelRef.current[uid] = formatRankTierLine(getRankData(lt));
+            } catch {
+              rankLabelRef.current[uid] = "—";
+            }
+          })
+        );
+        if (!cancelled) setRankLabelsTick((t) => t + 1);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [messages]);
+
   const send = useCallback(async () => {
     const raw = input.trim();
     if (!raw || sending) return;
@@ -251,6 +307,8 @@ export function ChatRoomPanel(props: {
     [myUid, deletingId, bumpActivity]
   );
 
+  void rankLabelsTick;
+
   return (
     <div
       className="fixed inset-0 z-[115] flex items-end justify-center bg-black/55 p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur-[2px] sm:items-center sm:p-4"
@@ -324,9 +382,19 @@ export function ChatRoomPanel(props: {
               className="rounded-xl border border-[#ece5d8]/10 bg-[#0a0f1e]/90 px-3 py-2 text-sm"
             >
               <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
-                <span className="font-medium text-[#ece5d8]/95">
-                  {m.displayName}
-                </span>
+                <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+                  <span className="font-medium text-[#ece5d8]/95">
+                    {m.displayName}
+                  </span>
+                  {rankLabelRef.current[m.uid] && (
+                    <span
+                      className="max-w-[13rem] truncate text-[0.9375rem] font-semibold leading-tight text-amber-200/85"
+                      title={rankLabelRef.current[m.uid]}
+                    >
+                      {rankLabelRef.current[m.uid]}
+                    </span>
+                  )}
+                </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="text-[0.65rem] tabular-nums text-white/40">
                     {formatChatSentAt(m.createdAt)}

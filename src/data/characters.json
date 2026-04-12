@@ -109,5 +109,6 @@
   { "name": "アイノ", "element": "水", "weapon": "両手剣", "rarity": 5, "region": "ナドクライ", "version": 6.0 },
   { "name": "ラウマ", "element": "草", "weapon": "法器", "rarity": 5, "region": "ナドクライ", "version": 6.0 },
   { "name": "ネフェル", "element": "草", "weapon": "法器", "rarity": 5, "region": "ナドクライ", "version": 6.1 },
-  { "name": "ドゥリン", "element": "炎", "weapon": "片手剣", "rarity": 5, "region": "モンド", "version": 6.2 }
+  { "name": "ドゥリン", "element": "炎", "weapon": "片手剣", "rarity": 5, "region": "モンド", "version": 6.2 },
+  { "name": "ヤフォダ", "element": "風", "weapon": "弓", "rarity": 4, "region": "ナドクライ", "version": 6.2 }
 ]

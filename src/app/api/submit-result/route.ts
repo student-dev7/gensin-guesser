@@ -45,6 +45,8 @@ type SubmitBody = {
   lostToGhost?: boolean;
   /** 降参した場合 true（キャラ統計の手数は 7 手として計上） */
   surrendered?: boolean;
+  /** 個人モード: 週次・累計レート・ゴールドは変えない */
+  personalMode?: boolean;
 };
 
 /** 降参・手数切れなど won:false の runs 記録用ペナルティ手数 */
@@ -112,6 +114,7 @@ export async function POST(req: Request) {
   } = body ?? ({} as SubmitBody);
 
   const surrendered = body.surrendered === true;
+  const personalMode = body.personalMode === true;
 
   if (!idToken || typeof idToken !== "string") {
     return NextResponse.json(
@@ -178,6 +181,17 @@ export async function POST(req: Request) {
     );
   }
 
+  if (
+    personalMode &&
+    (lostToGhostClaim ||
+      (typeof rawGhostRunId === "string" && rawGhostRunId.trim().length > 0))
+  ) {
+    return NextResponse.json(
+      { ok: false, error: "personalMode はゴーストと併用できません" },
+      { status: 400 }
+    );
+  }
+
   if (!characterName || typeof characterName !== "string") {
     return NextResponse.json(
       { ok: false, error: "Missing characterName" },
@@ -217,10 +231,12 @@ export async function POST(req: Request) {
       );
     }
 
-    const ghostHc = await resolveGhostHandCount(
-      characterName,
-      typeof rawGhostRunId === "string" ? rawGhostRunId : undefined
-    );
+    const ghostHc = personalMode
+      ? undefined
+      : await resolveGhostHandCount(
+          characterName,
+          typeof rawGhostRunId === "string" ? rawGhostRunId : undefined
+        );
 
     if (lostToGhostClaim) {
       if (
@@ -334,7 +350,7 @@ export async function POST(req: Request) {
         const lifetimeTotal = readLifetimeTotal(userData);
 
         let weeklyResetApplied = false;
-        if (userSnap.exists()) {
+        if (!personalMode && userSnap.exists()) {
           const storedKey = userData?.ratingWeekKey as string | undefined;
           if (storedKey !== undefined && storedKey !== currentWeekKey) {
             Rp = DEFAULT_INITIAL_RATING;
@@ -361,7 +377,15 @@ export async function POST(req: Request) {
         let winSpeedBonus: number | undefined;
         let ghostBeatBonus: number | undefined;
 
-        if (won) {
+        if (personalMode) {
+          newRating = Rp;
+          ratingDelta = 0;
+          eloActualScore = 0;
+          eloExpected = expectedScore(Rp, DEFAULT_INITIAL_RATING);
+          winBaseBonus = undefined;
+          winSpeedBonus = undefined;
+          ghostBeatBonus = undefined;
+        } else if (won) {
           const win = applyWinRatingBonus(
             Rp,
             averageHandCount,
@@ -387,35 +411,51 @@ export async function POST(req: Request) {
 
         const gamesAfter = gamesBefore + 1;
 
-        const goldEarned = goldEarnedFromRatingDelta(ratingDelta);
+        const goldEarned = personalMode
+          ? 0
+          : goldEarnedFromRatingDelta(ratingDelta);
         const goldTotal = goldBefore + goldEarned;
 
-        const newLifetimeTotal = clampLifetimeTotalRate(
-          lifetimeTotal + ratingDelta
-        );
+        /** 累計は減らさない（負け・減点時は週次のみ反映）。個人モードは累計も変えない */
+        const newLifetimeTotal = personalMode
+          ? lifetimeTotal
+          : clampLifetimeTotalRate(
+              lifetimeTotal + Math.max(0, ratingDelta)
+            );
 
-        const lifetimeTierPromoted = isLifetimeTierOrRankPromoted(
-          lifetimeTotal,
-          newLifetimeTotal
-        );
+        const lifetimeTierPromoted =
+          !personalMode &&
+          isLifetimeTierOrRankPromoted(lifetimeTotal, newLifetimeTotal);
         const promotedToRankLabel = lifetimeTierPromoted
           ? formatRankTierLine(getRankData(newLifetimeTotal))
           : undefined;
 
-        tx.set(
-          userRef,
-          {
-            current_rate: newRating,
-            lifetime_total_rate: newLifetimeTotal,
-            rating: newRating,
-            games: gamesAfter,
-            displayName,
-            ratingWeekKey: currentWeekKey,
-            updatedAt: serverTimestamp(),
-            ...(goldEarned > 0 ? { gold: increment(goldEarned) } : {}),
-          },
-          { merge: true }
-        );
+        if (personalMode) {
+          tx.set(
+            userRef,
+            {
+              displayName,
+              games: gamesAfter,
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          );
+        } else {
+          tx.set(
+            userRef,
+            {
+              current_rate: newRating,
+              lifetime_total_rate: newLifetimeTotal,
+              rating: newRating,
+              games: gamesAfter,
+              displayName,
+              ratingWeekKey: currentWeekKey,
+              updatedAt: serverTimestamp(),
+              ...(goldEarned > 0 ? { gold: increment(goldEarned) } : {}),
+            },
+            { merge: true }
+          );
+        }
 
         tx.set(
           runRef,
@@ -435,7 +475,8 @@ export async function POST(req: Request) {
             characterStatsUpdated: shouldIncrementCharacterStats,
             goldEarned,
             goldTotalAfter: goldTotal,
-            ...(won
+            personalMode,
+            ...(won && !personalMode
               ? {
                   winBaseBonus: winBaseBonus ?? 5,
                   winSpeedBonus: winSpeedBonus ?? 0,

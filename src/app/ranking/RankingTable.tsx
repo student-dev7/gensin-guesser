@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { RankingAvatar } from "@/components/RankingAvatar";
 import { RankLogoMark } from "@/components/RankLogoMark";
@@ -23,7 +24,12 @@ type Props = {
 };
 
 export function RankingTable({ rows, error }: Props) {
+  const router = useRouter();
   const [myUid, setMyUid] = useState<string | null | undefined>(undefined);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetMessage, setResetMessage] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,15 +64,122 @@ export function RankingTable({ rows, error }: Props) {
             レートは日本時間で週が切り替わるたび（月曜始まり）に 1500
             へリセットされ、以降の対戦から再計算されます。
           </p>
-          <div className="mt-8">
+          <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
             <Link
               href="/"
               className="inline-flex items-center justify-center rounded-full border border-[#ece5d8]/35 bg-[#12182a] px-6 py-2.5 text-sm font-medium text-[#ece5d8] shadow-[0_0_24px_-8px_rgba(236,229,216,0.25)] transition hover:border-[#ece5d8]/55 hover:bg-[#1a2238]"
             >
               ← トップへ戻る
             </Link>
+            <button
+              type="button"
+              onClick={() => {
+                setResetOpen(true);
+                setResetConfirm("");
+                setResetMessage(null);
+              }}
+              className="inline-flex items-center justify-center rounded-full border border-rose-500/45 bg-rose-950/35 px-6 py-2.5 text-sm font-medium text-rose-200/95 shadow-sm transition hover:border-rose-400/60 hover:bg-rose-950/55"
+            >
+              週次レートをリセット
+            </button>
           </div>
         </header>
+
+        {resetOpen && (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reset-rating-title"
+            onClick={() => setResetOpen(false)}
+          >
+            <div
+              className="w-full max-w-md rounded-2xl border border-[#ece5d8]/25 bg-[#12182a] p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2
+                id="reset-rating-title"
+                className="text-lg font-semibold text-[#ece5d8]"
+              >
+                週次レートのリセット
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-white/60">
+                表示用の週次レート（
+                <span className="text-[#ece5d8]/90">current_rate / rating</span>
+                ）を 1500 に戻します。累計レートは変わりません。実行するには下に{" "}
+                <span className="font-mono text-amber-200/95">quit</span>{" "}
+                と入力してください。
+              </p>
+              <input
+                value={resetConfirm}
+                onChange={(e) => setResetConfirm(e.target.value)}
+                autoComplete="off"
+                placeholder="quit"
+                className="mt-4 w-full rounded-xl border border-[#ece5d8]/20 bg-[#0a0f1e] px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-[#ece5d8]/45"
+              />
+              {resetMessage && (
+                <p className="mt-2 text-sm text-rose-400">{resetMessage}</p>
+              )}
+              <div className="mt-6 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setResetOpen(false)}
+                  className="rounded-xl px-4 py-2 text-sm text-white/70 transition hover:bg-white/10"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  disabled={resetLoading}
+                  onClick={async () => {
+                    setResetMessage(null);
+                    if (resetConfirm.trim().toLowerCase() !== "quit") {
+                      setResetMessage("「quit」と正確に入力してください");
+                      return;
+                    }
+                    setResetLoading(true);
+                    try {
+                      await ensureAnonymousSession();
+                      const auth = getFirebaseAuth();
+                      const idToken = await auth.currentUser?.getIdToken();
+                      if (!idToken) {
+                        setResetMessage("ログインが必要です");
+                        return;
+                      }
+                      const res = await fetch("/api/reset-season-rating", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          idToken,
+                          confirm: resetConfirm.trim(),
+                        }),
+                      });
+                      const json = (await res.json()) as {
+                        ok?: boolean;
+                        error?: string;
+                      };
+                      if (!json?.ok) {
+                        setResetMessage(json?.error ?? "リセットに失敗しました");
+                        return;
+                      }
+                      setResetOpen(false);
+                      router.refresh();
+                    } catch (e: unknown) {
+                      setResetMessage(
+                        e instanceof Error ? e.message : String(e)
+                      );
+                    } finally {
+                      setResetLoading(false);
+                    }
+                  }}
+                  className="rounded-xl border border-rose-500/50 bg-rose-900/40 px-4 py-2 text-sm font-medium text-rose-100 transition hover:bg-rose-900/60 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {resetLoading ? "処理中…" : "リセットする"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="overflow-hidden rounded-2xl border border-[#ece5d8]/20 bg-[#0d1324]/95 shadow-[0_25px_60px_-20px_rgba(0,0,0,0.65)] backdrop-blur-sm">
           <div className="border-b border-[#ece5d8]/15 bg-gradient-to-r from-[#0f1528] via-[#121a30] to-[#0f1528] px-5 py-4">
