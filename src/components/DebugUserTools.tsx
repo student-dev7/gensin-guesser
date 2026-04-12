@@ -18,10 +18,10 @@ import {
   ensureAnonymousSession,
   getFirebaseAuth,
 } from "@/lib/firebaseClient";
-import { isDevLocalhostHost } from "@/lib/devLocalhost";
+import { useAdminMode } from "@/components/AdminModeProvider";
 
 export function DebugUserTools() {
-  const [showUi, setShowUi] = useState(false);
+  const { showAdminTools } = useAdminMode();
   const [open, setOpen] = useState(false);
   const [seasonDraft, setSeasonDraft] = useState("");
   const [lifetimeDraft, setLifetimeDraft] = useState("");
@@ -30,10 +30,6 @@ export function DebugUserTools() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setShowUi(isDevLocalhostHost(window.location.hostname));
-  }, []);
 
   const loadCurrent = useCallback(async () => {
     setError(null);
@@ -82,9 +78,9 @@ export function DebugUserTools() {
   }, []);
 
   useEffect(() => {
-    if (!open || !showUi) return;
+    if (!open || !showAdminTools) return;
     void loadCurrent();
-  }, [open, showUi, loadCurrent]);
+  }, [open, showAdminTools, loadCurrent]);
 
   const apply = useCallback(async () => {
     setError(null);
@@ -132,7 +128,7 @@ export function DebugUserTools() {
     }
   }, [seasonDraft, lifetimeDraft, goldDraft]);
 
-  if (!showUi) return null;
+  if (!showAdminTools) return null;
 
   return (
     <>
@@ -140,7 +136,7 @@ export function DebugUserTools() {
         type="button"
         onClick={() => setOpen(true)}
         className="fixed bottom-4 left-4 z-[200] rounded-lg border border-rose-500/50 bg-rose-950/95 px-2.5 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-wide text-rose-100 shadow-lg shadow-black/40 backdrop-blur-sm hover:border-rose-400/70 hover:bg-rose-900/95"
-        title="localhost のみ表示（デバッグ）"
+        title="管理者モード有効時のみ表示（DBG）"
       >
         DBG
       </button>
@@ -161,7 +157,7 @@ export function DebugUserTools() {
                 id="debug-user-title"
                 className="text-sm font-semibold text-rose-100"
               >
-                デバッグ（localhost のみ）
+                デバッグ（管理者モード）
               </h2>
               <button
                 type="button"
@@ -173,7 +169,8 @@ export function DebugUserTools() {
               </button>
             </div>
             <p className="mt-2 text-xs leading-relaxed text-rose-200/70">
-              自分の Firestore ユーザーを直接書き換えます。本番では表示されません。
+              自分の Firestore ユーザーを直接書き換えます。管理者モードと
+              localhost で表示されます。
             </p>
 
             <div className="mt-4 space-y-3">

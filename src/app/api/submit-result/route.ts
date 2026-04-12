@@ -29,6 +29,7 @@ import {
   getRankData,
   isLifetimeTierOrRankPromoted,
 } from "@/lib/rankUtils";
+import { isAdminUid } from "@/lib/adminUids";
 import { validateDisplayName } from "@/lib/validateDisplayName";
 
 type SubmitBody = {
@@ -205,8 +206,17 @@ export async function POST(req: Request) {
     );
   }
 
+  const uid = await getUidFromIdToken(idToken);
+  if (!uid) {
+    return NextResponse.json(
+      { ok: false, error: "Invalid or expired idToken" },
+      { status: 401 }
+    );
+  }
+
   const nameCheck = validateDisplayName(
-    typeof rawDisplayName === "string" ? rawDisplayName : ""
+    typeof rawDisplayName === "string" ? rawDisplayName : "",
+    { ignoreBadSubstrings: isAdminUid(uid) }
   );
   if (!nameCheck.ok) {
     return NextResponse.json(
@@ -223,14 +233,6 @@ export async function POST(req: Request) {
   const currentWeekKey = getRatingWeekMondayKeyJst();
 
   try {
-    const uid = await getUidFromIdToken(idToken);
-    if (!uid) {
-      return NextResponse.json(
-        { ok: false, error: "Invalid or expired idToken" },
-        { status: 401 }
-      );
-    }
-
     const ghostHc = personalMode
       ? undefined
       : await resolveGhostHandCount(
@@ -478,7 +480,7 @@ export async function POST(req: Request) {
             personalMode,
             ...(won && !personalMode
               ? {
-                  winBaseBonus: winBaseBonus ?? 5,
+                  winBaseBonus: winBaseBonus ?? 6,
                   winSpeedBonus: winSpeedBonus ?? 0,
                   ghostBeatBonus: ghostBeatBonus ?? 0,
                 }

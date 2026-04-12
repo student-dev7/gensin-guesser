@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CHARACTERS from "../data/characters.json";
+import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, getFirestore } from "firebase/firestore";
 import { ChatRoomPanel } from "../components/ChatRoomPanel";
 import { GoldCoinIcon } from "../components/GoldCoinIcon";
@@ -13,7 +14,8 @@ import {
   getFirebaseAuth,
 } from "../lib/firebaseClient";
 import { DEBUG_USER_UPDATED_EVENT } from "../lib/debugUserEvents";
-import { isDevLocalhostHost } from "../lib/devLocalhost";
+import { useAdminMode } from "@/components/AdminModeProvider";
+import { isAdminUid } from "../lib/adminUids";
 import { validateDisplayName } from "../lib/validateDisplayName";
 
 type Character = (typeof CHARACTERS)[number];
@@ -107,8 +109,7 @@ export default function Home() {
   const [goldHintOpen, setGoldHintOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const goldBarRef = useRef<HTMLDivElement | null>(null);
-  /** localhost のみ（DBG と同条件） */
-  const [debugHost, setDebugHost] = useState(false);
+  const { showAdminTools } = useAdminMode();
   const [debugRevealAnswer, setDebugRevealAnswer] = useState(false);
   const [ghost, setGhost] = useState<GhostInfo | null>(null);
   const [ghostEcho, setGhostEcho] = useState<string | null>(null);
@@ -120,6 +121,7 @@ export default function Home() {
   const [patchSection, setPatchSection] = useState<
     "battle" | "stats" | "rate" | null
   >(null);
+  const [viewerUid, setViewerUid] = useState<string | null>(null);
 
   const syncUserProfile = useCallback(async () => {
     try {
@@ -161,14 +163,26 @@ export default function Home() {
   }, []);
 
   const draftPreview = useMemo(
-    () => validateDisplayName(nameDraft),
-    [nameDraft]
+    () =>
+      validateDisplayName(nameDraft, {
+        ignoreBadSubstrings: isAdminUid(viewerUid),
+      }),
+    [nameDraft, viewerUid]
   );
 
   useEffect(() => {
     void ensureAnonymousSession().catch(() => {
       /* 送信時に再試行 */
     });
+  }, []);
+
+  useEffect(() => {
+    const auth = getFirebaseAuth();
+    setViewerUid(auth.currentUser?.uid ?? null);
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setViewerUid(u?.uid ?? null);
+    });
+    return () => unsub();
   }, []);
 
   useEffect(() => {
@@ -212,10 +226,6 @@ export default function Home() {
       /* ignore */
     }
   }, [battleModeVs]);
-
-  useEffect(() => {
-    setDebugHost(isDevLocalhostHost(window.location.hostname));
-  }, []);
 
   useEffect(() => {
     setGhost(null);
@@ -361,7 +371,12 @@ export default function Home() {
     const run = async () => {
       await ensureAnonymousSession();
 
-      const nameCheck = validateDisplayName(playerName);
+      const authForName = getFirebaseAuth();
+      const nameCheck = validateDisplayName(playerName, {
+        ignoreBadSubstrings: isAdminUid(
+          authForName.currentUser?.uid ?? null
+        ),
+      });
       if (!nameCheck.ok) {
         if (!cancelled) {
           setSubmitError(nameCheck.error);
@@ -500,11 +515,13 @@ export default function Home() {
 
   const saveNameFromModal = useCallback(() => {
     setNameFieldTouched(true);
-    const v = validateDisplayName(nameDraft);
+    const v = validateDisplayName(nameDraft, {
+      ignoreBadSubstrings: isAdminUid(viewerUid),
+    });
     if (!v.ok) return;
     setPlayerName(v.name);
     setNameModalOpen(false);
-  }, [nameDraft]);
+  }, [nameDraft, viewerUid]);
 
   const nameHintModal =
     nameFieldTouched && !draftPreview.ok ? draftPreview.error : null;
@@ -769,7 +786,7 @@ export default function Home() {
                         <p className="mt-1.5 text-white/65">
                           週次レートの「勝ち」は{" "}
                           <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
-                            +5 + max(0, 平均−自分の手数)×2
+                            +6 + max(0, 平均−自分の手数)×2
                           </span>
                           （＋ゴーストがいる場合はさらに{" "}
                           <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
@@ -792,24 +809,24 @@ export default function Home() {
                             <tbody className="text-white/80">
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">1</td>
-                                <td className="text-emerald-200/95">+11</td>
+                                <td className="text-emerald-200/95">+12</td>
                               </tr>
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">2</td>
-                                <td className="text-emerald-200/95">+9</td>
+                                <td className="text-emerald-200/95">+10</td>
                               </tr>
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">3</td>
-                                <td className="text-emerald-200/95">+7</td>
+                                <td className="text-emerald-200/95">+8</td>
                               </tr>
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">4</td>
-                                <td className="text-emerald-200/95">+5</td>
+                                <td className="text-emerald-200/95">+6</td>
                               </tr>
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">5〜7</td>
                                 <td className="text-emerald-200/95">
-                                  +5（平均より遅いので速度ボーナスなし）
+                                  +6（平均より遅いので速度ボーナスなし）
                                 </td>
                               </tr>
                             </tbody>
@@ -903,7 +920,7 @@ export default function Home() {
             <p className="mt-2 text-sm text-amber-300/95">{message}</p>
           )}
 
-          {debugHost && (
+          {showAdminTools && (
             <div className="mt-2 rounded-lg border border-rose-500/35 bg-rose-950/30 px-3 py-2">
               <button
                 type="button"

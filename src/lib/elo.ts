@@ -60,8 +60,8 @@ export function computeNewPlayerRating(
   };
 }
 
-/** 正解時: 最低 +5 に加え、(平均手数 − 自分の手数)×2 を上乗せ（平均より遅い場合は 0） */
-const WIN_BASE_BONUS = 5;
+/** 正解時: 最低 +6 に加え、(平均手数 − 自分の手数)×2 を上乗せ（平均より遅い場合は 0） */
+const WIN_BASE_BONUS = 6;
 const WIN_SPEED_MULTIPLIER = 2;
 
 export type ApplyWinRatingBonusOptions = {

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { AdminModeProvider } from "@/components/AdminModeProvider";
 import { DebugUserTools } from "@/components/DebugUserTools";
 import { FirebaseAnalyticsInit } from "@/components/FirebaseAnalyticsInit";
 import { LegalFooter } from "@/components/LegalFooter";
@@ -112,9 +113,11 @@ export default function RootLayout({
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
-        <div className="flex min-h-0 flex-1 flex-col">{children}</div>
-        <LegalFooter />
-        <DebugUserTools />
+        <AdminModeProvider>
+          <div className="flex min-h-0 flex-1 flex-col">{children}</div>
+          <LegalFooter />
+          <DebugUserTools />
+        </AdminModeProvider>
         <FirebaseAnalyticsInit />
         <Analytics />
       </body>

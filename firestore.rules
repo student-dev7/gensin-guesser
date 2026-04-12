@@ -4,6 +4,12 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // chat_messages の削除許可は isChatModerator と同期（adminUids.ts の BUILTIN / 追加分は手動で追加）
+    function isChatModerator() {
+      return request.auth != null
+        && request.auth.uid == 'WVvphz6TOZSKuwck6Kf83vAFupo2';
+    }
+
     match /users/{userId} {
       allow read: if true;
       // write だと delete も許可されるため create/update のみ
@@ -46,9 +52,9 @@ service cloud.firestore {
         // serverTimestamp() 相当（クライアントが時刻を偽装できない）
         && request.resource.data.createdAt == request.time;
       allow update: if false;
-      // 自分が送ったメッセージのみ削除可（他人の分はサーバー管理が必要）
+      // 自分のメッセージ、または管理者 UID（全削除・個別削除）
       allow delete: if request.auth != null
-        && resource.data.uid == request.auth.uid;
+        && (resource.data.uid == request.auth.uid || isChatModerator());
     }
   }
 }

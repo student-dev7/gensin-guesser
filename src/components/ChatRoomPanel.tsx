@@ -13,6 +13,7 @@ import {
   deleteDoc,
   doc,
   getDoc,
+  getDocs,
   getFirestore,
   limit,
   onSnapshot,
@@ -20,19 +21,28 @@ import {
   query,
   serverTimestamp,
   Timestamp,
+  writeBatch,
 } from "firebase/firestore";
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
 } from "../lib/firebaseClient";
+import { RankLogoMark } from "./RankLogoMark";
 import { DEFAULT_INITIAL_RATING } from "../lib/elo";
-import { formatRankTierLine, getRankData } from "../lib/rankUtils";
+import {
+  formatRankTierLine,
+  getRankData,
+  rateForRankDisplay,
+} from "../lib/rankUtils";
+import { isAdminUid } from "../lib/adminUids";
 import { validateDisplayName } from "../lib/validateDisplayName";
 
 const CHAT_COLLECTION = "chat_messages";
 const CHAT_MESSAGE_MAX = 80;
 /** 保持・表示する最大件数（古いものから削除） */
 const MAX_CHAT_MESSAGES = 15;
+/** 管理者の一括削除で1回のバッチに載せる最大件数（Firestore 上限 500 未満） */
+const ADMIN_PURGE_BATCH = 450;
 /** 無操作でリスナーを外す（分） */
 const IDLE_MINUTES = 4;
 const IDLE_MS = IDLE_MINUTES * 60 * 1000;
@@ -81,8 +91,11 @@ export function ChatRoomPanel(props: {
   const [reconnectKey, setReconnectKey] = useState(0);
   const [myUid, setMyUid] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [clearingAll, setClearingAll] = useState(false);
   /** uid → 累計レート由来のランク表示ラベル（再レンダー用に tick と併用） */
   const rankLabelRef = useRef<Record<string, string>>({});
+  /** ランクロゴ用（rateForRankDisplay 済みの累計レート） */
+  const rankDisplayRatingRef = useRef<Record<string, number | undefined>>({});
   const [rankLabelsTick, setRankLabelsTick] = useState(0);
 
   const unsubRef = useRef<(() => void) | null>(null);
@@ -91,9 +104,11 @@ export function ChatRoomPanel(props: {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
   const displayNameForSend = useMemo(() => {
-    const v = validateDisplayName(props.playerName);
+    const v = validateDisplayName(props.playerName, {
+      ignoreBadSubstrings: myUid != null && isAdminUid(myUid),
+    });
     return v.ok ? v.name : "旅人";
-  }, [props.playerName]);
+  }, [props.playerName, myUid]);
 
   const bumpActivity = useCallback(() => {
     bumpActivityRef.current();
@@ -216,9 +231,14 @@ export function ChatRoomPanel(props: {
                   lt = d.rating;
                 }
               }
-              rankLabelRef.current[uid] = formatRankTierLine(getRankData(lt));
+              const displayRate = rateForRankDisplay(lt);
+              rankDisplayRatingRef.current[uid] = displayRate;
+              rankLabelRef.current[uid] = formatRankTierLine(
+                getRankData(displayRate)
+              );
             } catch {
               rankLabelRef.current[uid] = "—";
+              rankDisplayRatingRef.current[uid] = undefined;
             }
           })
         );
@@ -281,17 +301,20 @@ export function ChatRoomPanel(props: {
     setReconnectKey((k) => k + 1);
   }, []);
 
+  const isModerator = myUid != null && isAdminUid(myUid);
+
   const deleteMessage = useCallback(
     async (messageId: string, authorUid: string) => {
       if (!messageId || deletingId) return;
-      if (!myUid || authorUid !== myUid) return;
+      if (!myUid) return;
+      if (authorUid !== myUid && !isAdminUid(myUid)) return;
       setDeletingId(messageId);
       setError(null);
       try {
         await ensureAnonymousSession();
         const auth = getFirebaseAuth();
         const uid = auth.currentUser?.uid;
-        if (!uid || uid !== authorUid) {
+        if (!uid || (uid !== authorUid && !isAdminUid(uid))) {
           setError("削除できませんでした");
           return;
         }
@@ -306,6 +329,46 @@ export function ChatRoomPanel(props: {
     },
     [myUid, deletingId, bumpActivity]
   );
+
+  const deleteAllMessages = useCallback(async () => {
+    if (!myUid || !isAdminUid(myUid) || clearingAll) return;
+    if (
+      !window.confirm(
+        "チャットのメッセージをすべて削除しますか？（取り消せません）"
+      )
+    ) {
+      return;
+    }
+    setClearingAll(true);
+    setError(null);
+    try {
+      await ensureAnonymousSession();
+      const auth = getFirebaseAuth();
+      const uid = auth.currentUser?.uid;
+      if (!uid || !isAdminUid(uid)) {
+        setError("管理者のみ実行できます");
+        return;
+      }
+      const db = getFirestore(auth.app);
+      for (;;) {
+        const snap = await getDocs(
+          query(collection(db, CHAT_COLLECTION), limit(ADMIN_PURGE_BATCH))
+        );
+        if (snap.empty) break;
+        const batch = writeBatch(db);
+        for (const d of snap.docs) {
+          batch.delete(d.ref);
+        }
+        await batch.commit();
+        if (snap.docs.length < ADMIN_PURGE_BATCH) break;
+      }
+      bumpActivity();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setClearingAll(false);
+    }
+  }, [myUid, clearingAll, bumpActivity]);
 
   void rankLabelsTick;
 
@@ -325,6 +388,16 @@ export function ChatRoomPanel(props: {
             チャット
           </h2>
           <div className="flex items-center gap-2">
+            {isModerator && (
+              <button
+                type="button"
+                onClick={() => void deleteAllMessages()}
+                disabled={clearingAll}
+                className="rounded-lg border border-rose-500/40 px-2 py-1 text-xs font-medium text-rose-200/95 transition hover:bg-rose-950/50 disabled:cursor-not-allowed disabled:opacity-45"
+              >
+                {clearingAll ? "削除中…" : "全削除"}
+              </button>
+            )}
             <span
               className={`text-xs tabular-nums ${
                 connected ? "text-emerald-300/90" : "text-amber-200/85"
@@ -387,11 +460,21 @@ export function ChatRoomPanel(props: {
                     {m.displayName}
                   </span>
                   {rankLabelRef.current[m.uid] && (
-                    <span
-                      className="max-w-[13rem] truncate text-[0.9375rem] font-semibold leading-tight text-amber-200/85"
-                      title={rankLabelRef.current[m.uid]}
-                    >
-                      {rankLabelRef.current[m.uid]}
+                    <span className="flex min-w-0 max-w-[min(100%,13rem)] items-center gap-1">
+                      {rankDisplayRatingRef.current[m.uid] != null &&
+                        rankLabelRef.current[m.uid] !== "—" && (
+                          <RankLogoMark
+                            rating={rankDisplayRatingRef.current[m.uid]!}
+                            sizePx={15}
+                            className="shrink-0"
+                          />
+                        )}
+                      <span
+                        className="min-w-0 truncate text-[0.9375rem] font-semibold leading-tight text-amber-200/85"
+                        title={rankLabelRef.current[m.uid]}
+                      >
+                        {rankLabelRef.current[m.uid]}
+                      </span>
                     </span>
                   )}
                 </div>
@@ -399,7 +482,7 @@ export function ChatRoomPanel(props: {
                   <span className="text-[0.65rem] tabular-nums text-white/40">
                     {formatChatSentAt(m.createdAt)}
                   </span>
-                  {myUid != null && m.uid === myUid && (
+                  {myUid != null && (m.uid === myUid || isModerator) && (
                     <button
                       type="button"
                       onClick={() => void deleteMessage(m.id, m.uid)}
