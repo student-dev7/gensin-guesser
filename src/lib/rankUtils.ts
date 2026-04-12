@@ -1,20 +1,27 @@
-import { DEFAULT_INITIAL_RATING, MIN_RATING } from "./elo";
+import {
+  DEFAULT_INITIAL_RATING,
+  MAX_RATING,
+  MIN_RATING,
+} from "./rating";
 
 /**
- * 【ランク表示の基準：累計レート（lifetime_total_rate）】
- * - 試合終了時のレート増減は、シーズン用の `current_rate` と、この累計の両方に加算される。
- * - 毎週のリセットでは `current_rate` だけが基準値（例: 1500）に戻り、累計は維持される。
- * - ランク帯・「次のランクまであと◯◯」は累計レートのみから算出する（シーズンレートは使わない）。
+ * 【ランク表示の基準：シーズンレート（current_rate / rating）】
  */
 
-/** ランク・昇格までの pt 表示に使う累計レート（未設定時は初期値） */
+/** ウォリアー〜ミシックの各ティア（IV→III→II→I）の幅。勝ち1戦 +10〜+20 前後を想定し、ティア1段で約6〜12戦相当。 */
+export const RANK_TIER_WIDTH_PT = 125;
+
+/** ウォリアー／エリートなどランク名が変わる帯の幅（各 500pt）。1 ランクダウンはおおよそこの幅。 */
+export const RANK_BAND_WIDTH_PT = 500;
+
+/** ランク・昇格までの pt 表示に使うレート（シーズンレート） */
 export function rateForRankDisplay(
-  lifetimeTotalRate: number | null | undefined
+  seasonRate: number | null | undefined
 ): number {
-  if (lifetimeTotalRate == null || !Number.isFinite(lifetimeTotalRate)) {
+  if (seasonRate == null || !Number.isFinite(seasonRate)) {
     return DEFAULT_INITIAL_RATING;
   }
-  return lifetimeTotalRate;
+  return seasonRate;
 }
 
 export type RomanTier = "IV" | "III" | "II" | "I";
@@ -35,7 +42,7 @@ export type RankData = {
   rankName: string;
   imagePath: string;
   tierRoman: RomanTier | null;
-  /** 現在ランク帯のレート範囲（Mythic Glory は max を大きな値で表す） */
+  /** 現在ランク帯のレート範囲 */
   bracketMin: number;
   bracketMax: number;
 };
@@ -43,9 +50,9 @@ export type RankData = {
 export type TierProgress = {
   /** 現在ティア内の進捗 0〜100 */
   progressPercent: number;
-  /** 次のティア（または次ランク）まであと何 pt か（整数に丸め） */
+  /** 次のティア（または次ランク・最終到達）まであと何 pt か（整数に丸め） */
   pointsToNext: number;
-  /** Mythic Glory など、これ以上の昇格がない */
+  /** これ以上の昇格がない */
   isFinal: boolean;
 };
 
@@ -61,28 +68,21 @@ type RankBand = {
 };
 
 /**
- * ランク帯（ティア幅は帯内で4分割）。
- * シルバー廃止後: エリートが旧シルバー下限〜旧エリート上限をまとめて担当（1620〜2099、幅120×4）。
- * マスター以降の境界は従来どおり。
+ * 8 段階ランク（ウォリアー〜ミシック）＋最上位ミシックグローリー。
+ * 各ランク 500pt 幅、内部を IV〜I の 4 ティアに分割（125pt×4）。
  */
 export const RANK_BANDS: readonly RankBand[] = [
-  { id: "warrior", nameJa: "ウォリアー", min: 1500, max: 1619, tierWidth: 30 },
-  { id: "elite", nameJa: "エリート", min: 1620, max: 2099, tierWidth: 120 },
-  { id: "master", nameJa: "マスター", min: 2100, max: 2459, tierWidth: 90 },
-  { id: "grandmaster", nameJa: "グランドマスター", min: 2460, max: 2899, tierWidth: 110 },
-  { id: "epic", nameJa: "エピック", min: 2900, max: 3419, tierWidth: 130 },
-  { id: "legend", nameJa: "レジェンド", min: 3420, max: 4019, tierWidth: 150 },
-  {
-    id: "mythic",
-    nameJa: "ミシック",
-    min: 4020,
-    max: 7499,
-    /** 4020〜7499 を IV〜I に4分割（7500 からミシックグローリー） */
-    tierWidth: 870,
-  },
+  { id: "warrior", nameJa: "ウォリアー", min: 1000, max: 1499, tierWidth: RANK_TIER_WIDTH_PT },
+  { id: "elite", nameJa: "エリート", min: 1500, max: 1999, tierWidth: RANK_TIER_WIDTH_PT },
+  { id: "master", nameJa: "マスター", min: 2000, max: 2499, tierWidth: RANK_TIER_WIDTH_PT },
+  { id: "grandmaster", nameJa: "グランドマスター", min: 2500, max: 2999, tierWidth: RANK_TIER_WIDTH_PT },
+  { id: "epic", nameJa: "エピック", min: 3000, max: 3499, tierWidth: RANK_TIER_WIDTH_PT },
+  { id: "legend", nameJa: "レジェンド", min: 3500, max: 3999, tierWidth: RANK_TIER_WIDTH_PT },
+  { id: "mythic", nameJa: "ミシック", min: 4000, max: 4499, tierWidth: RANK_TIER_WIDTH_PT },
 ] as const;
 
-export const MYTHIC_GLORY_MIN = 7500;
+/** ミシックグローリー下限（ローマ数字なし・最上位帯） */
+export const MYTHIC_GLORY_MIN = 4500;
 
 export function rankImagePath(rankId: RankId): string {
   return `/assets/ranks/${rankId}.png`;
@@ -97,28 +97,31 @@ export function getRankLogoContentScale(rankId: RankId): number {
   return 1;
 }
 
-/** モーダル用：各ランクの必要レート範囲一覧（ロゴ用 rankId 付き） */
+/** モーダル・一覧用：各ランクの必要レート範囲とティア幅 */
 export function getRankRangeTableRows(): {
   rankId: RankId;
   rankName: string;
   rangeLabel: string;
+  tierWidthLabel: string;
 }[] {
   const rows = RANK_BANDS.map((b) => ({
     rankId: b.id as RankId,
     rankName: b.nameJa,
     rangeLabel: `${b.min} 〜 ${b.max}`,
+    tierWidthLabel: `${b.tierWidth} pt（IV〜I の各ティア）`,
   }));
   rows.push({
     rankId: "mythic-glory",
     rankName: "ミシックグローリー",
-    rangeLabel: `${MYTHIC_GLORY_MIN} 〜`,
+    rangeLabel: `${MYTHIC_GLORY_MIN} 〜 ${MAX_RATING}`,
+    tierWidthLabel: `${MAX_RATING - MYTHIC_GLORY_MIN + 1} pt（帯全体・ローマ数字なし）`,
   });
   return rows;
 }
 
 function clampRate(rate: number): number {
   if (!Number.isFinite(rate)) return MIN_RATING;
-  return rate;
+  return Math.max(MIN_RATING, Math.min(MAX_RATING, rate));
 }
 
 function tierBoundsInBand(
@@ -133,8 +136,7 @@ function tierBoundsInBand(
 }
 
 /**
- * レートからランク名・画像・ローマ字ティアを返す。
- * 1500 未満は Warrior IV 固定。
+ * レートからランク名・画像・ローマ字ティアを返す（シーズンレート基準）。
  */
 export function getRankData(rate: number): RankData {
   const r = clampRate(rate);
@@ -146,20 +148,7 @@ export function getRankData(rate: number): RankData {
       imagePath: rankImagePath("mythic-glory"),
       tierRoman: null,
       bracketMin: MYTHIC_GLORY_MIN,
-      bracketMax: 99999,
-    };
-  }
-
-  if (r < 1500) {
-    const warrior = RANK_BANDS[0]!;
-    const { low, high } = tierBoundsInBand(warrior, "IV");
-    return {
-      rankId: "warrior",
-      rankName: warrior.nameJa,
-      imagePath: rankImagePath("warrior"),
-      tierRoman: "IV",
-      bracketMin: low,
-      bracketMax: high,
+      bracketMax: MAX_RATING,
     };
   }
 
@@ -203,7 +192,7 @@ const ROMAN_STEP: Record<RomanTier, number> = {
   I: 3,
 };
 
-/** ランク名＋ローマティア（累計レート表示用） */
+/** ランク名＋ローマティア（表示用） */
 export function formatRankTierLine(data: RankData): string {
   return data.tierRoman != null
     ? `${data.rankName} ${data.tierRoman}`
@@ -211,22 +200,21 @@ export function formatRankTierLine(data: RankData): string {
 }
 
 /**
- * 累計レートが before→after で、ランク帯またはティアが一段上がったか。
- * 同じティア内の数値上昇のみでは false。
+ * シーズンレートが before→after で、ランク帯またはティアが一段上がったか。
  */
-export function isLifetimeTierOrRankPromoted(
-  lifetimeBefore: number,
-  lifetimeAfter: number
+export function isSeasonTierOrRankPromoted(
+  seasonBefore: number,
+  seasonAfter: number
 ): boolean {
   if (
-    !Number.isFinite(lifetimeBefore) ||
-    !Number.isFinite(lifetimeAfter) ||
-    lifetimeAfter <= lifetimeBefore
+    !Number.isFinite(seasonBefore) ||
+    !Number.isFinite(seasonAfter) ||
+    seasonAfter <= seasonBefore
   ) {
     return false;
   }
-  const before = getRankData(lifetimeBefore);
-  const after = getRankData(lifetimeAfter);
+  const before = getRankData(seasonBefore);
+  const after = getRankData(seasonAfter);
 
   const ai = rankLadderIndex(after.rankId);
   const bi = rankLadderIndex(before.rankId);
@@ -240,35 +228,34 @@ export function isLifetimeTierOrRankPromoted(
 }
 
 /**
- * 現在ティア内の進捗と、昇格までのポイント。
- * 1500 未満は Warrior IV として Warrior IV 内の進捗（IV→III へは 1530 未満の差分）。
+ * 現在ティア内の進捗と、昇格までのポイント（シーズンレート）。
  */
 export function getTierProgress(rate: number): TierProgress {
   const r = clampRate(rate);
 
-  if (r >= MYTHIC_GLORY_MIN) {
+  if (r >= MAX_RATING) {
     return { progressPercent: 100, pointsToNext: 0, isFinal: true };
   }
 
-  const band =
-    RANK_BANDS.find((b) => r >= b.min && r <= b.max) ?? RANK_BANDS[0]!;
-  const w = band.tierWidth;
-
-  /** 1500 未満：Warrior IV として扱う */
-  if (r < 1500) {
-    const warrior = RANK_BANDS[0]!;
-    const { low, high } = tierBoundsInBand(warrior, "IV");
-    const nextStart = high + 1;
+  if (r >= MYTHIC_GLORY_MIN) {
+    const low = MYTHIC_GLORY_MIN;
+    const high = MAX_RATING;
     const denom = high - low;
     const progressPercent =
-      denom <= 0 ? 0 : Math.max(0, Math.min(100, ((r - low) / denom) * 100));
-    const pointsToNext = Math.max(0, Math.ceil(nextStart - r));
+      denom <= 0
+        ? 100
+        : Math.max(0, Math.min(100, ((r - low) / denom) * 100));
+    const pointsToNext = Math.max(0, Math.ceil(high - r));
     return {
       progressPercent,
       pointsToNext,
       isFinal: false,
     };
   }
+
+  const band =
+    RANK_BANDS.find((b) => r >= b.min && r <= b.max) ?? RANK_BANDS[0]!;
+  const w = band.tierWidth;
 
   const idx = Math.min(3, Math.max(0, Math.floor((r - band.min) / w)));
   const tierRoman = ROMAN_BY_INDEX[idx]!;
@@ -298,9 +285,8 @@ export function getTierProgress(rate: number): TierProgress {
   };
 }
 
-/** 累計レートからティア内バー表示用（例: ウォリアーは幅 30 で「14 / 30」） */
 export type TierBarFromRate = {
-  /** 現在ティアの幅（RANK_BANDS の tierWidth。ウォリアーなら 30） */
+  /** 現在ティアの幅（RANK_BANDS の tierWidth。ミシックグローリーは帯全体幅） */
   tierSpan: number;
   /**
    * ティア下限からのオフセット（0 〜 tierSpan-1）。ティア下限で 0、上限付近で最大。
@@ -313,12 +299,12 @@ export type TierBarFromRate = {
 };
 
 /**
- * 累計レートを基準に、現在ティア内の進捗（分母はその帯の tierWidth）と昇格までの pt を返す。
+ * シーズンレートを基準に、現在ティア内の進捗と昇格までの pt を返す。
  */
-export function getTierBarFromLifetimeRate(lifetimeRate: number): TierBarFromRate {
-  const r = clampRate(lifetimeRate);
+export function getTierBarFromSeasonRate(seasonRate: number): TierBarFromRate {
+  const r = clampRate(seasonRate);
 
-  if (r >= MYTHIC_GLORY_MIN) {
+  if (r >= MAX_RATING) {
     return {
       tierSpan: 0,
       progressInTier: 0,
@@ -328,23 +314,30 @@ export function getTierBarFromLifetimeRate(lifetimeRate: number): TierBarFromRat
     };
   }
 
-  let band: RankBand;
-  let low: number;
-  let high: number;
-  let w: number;
-
-  if (r < 1500) {
-    band = RANK_BANDS[0]!;
-    w = band.tierWidth;
-    ({ low, high } = tierBoundsInBand(band, "IV"));
-  } else {
-    band =
-      RANK_BANDS.find((b) => r >= b.min && r <= b.max) ?? RANK_BANDS[0]!;
-    w = band.tierWidth;
-    const idx = Math.min(3, Math.max(0, Math.floor((r - band.min) / w)));
-    const tierRoman = ROMAN_BY_INDEX[idx]!;
-    ({ low, high } = tierBoundsInBand(band, tierRoman));
+  if (r >= MYTHIC_GLORY_MIN) {
+    const low = MYTHIC_GLORY_MIN;
+    const high = MAX_RATING;
+    const w = high - low + 1;
+    const rInt = Math.floor(r);
+    const offsetFromLow = Math.min(w - 1, Math.max(0, rInt - low));
+    const fillRatio =
+      w <= 1 ? 1 : Math.min(1, Math.max(0, (rInt - low) / (high - low)));
+    const tp = getTierProgress(seasonRate);
+    return {
+      tierSpan: w,
+      progressInTier: offsetFromLow,
+      fillRatio,
+      pointsToNext: tp.pointsToNext,
+      isFinal: false,
+    };
   }
+
+  const band =
+    RANK_BANDS.find((b) => r >= b.min && r <= b.max) ?? RANK_BANDS[0]!;
+  const w = band.tierWidth;
+  const idx = Math.min(3, Math.max(0, Math.floor((r - band.min) / w)));
+  const tierRoman = ROMAN_BY_INDEX[idx]!;
+  const { low, high } = tierBoundsInBand(band, tierRoman);
 
   const rInt = Math.floor(r);
   const offsetFromLow =
@@ -357,7 +350,7 @@ export function getTierBarFromLifetimeRate(lifetimeRate: number): TierBarFromRat
         : 0
       : Math.min(1, Math.max(0, (rInt - low) / (w - 1)));
 
-  const tp = getTierProgress(lifetimeRate);
+  const tp = getTierProgress(seasonRate);
 
   return {
     tierSpan: w,

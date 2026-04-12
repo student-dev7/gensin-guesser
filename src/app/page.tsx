@@ -8,7 +8,7 @@ import { doc, getDoc, getFirestore } from "firebase/firestore";
 import { ChatRoomPanel } from "../components/ChatRoomPanel";
 import { GoldCoinIcon } from "../components/GoldCoinIcon";
 import { MyRankStatus } from "../components/MyRankStatus";
-import { DEFAULT_INITIAL_RATING } from "../lib/elo";
+import { DEFAULT_INITIAL_RATING } from "../lib/rating";
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
@@ -64,17 +64,18 @@ type RatingStats = {
   after: number;
   delta: number;
   alreadySubmitted: boolean;
-  weeklyResetApplied?: boolean;
   /** 正解キャラの全プレイヤー記録に基づく平均手数（単純平均・サーバー算出） */
   characterAverageHands?: number;
   /** このラウンドで獲得したゴールド（レート増分×10、重複送信時は 0） */
   goldEarned?: number;
   /** 反映後の累計ゴールド */
   goldTotal?: number;
-  /** 累計レートでティアまたはランク帯が一段上がった（この送信で初めて記録したときのみ） */
-  lifetimeTierPromoted?: boolean;
+  /** シーズンレートでティアまたはランク帯が一段上がった（この送信で初めて記録したときのみ） */
+  seasonTierPromoted?: boolean;
   /** 昇格後の表示ラベル（例: ウォリアー III） */
   promotedToRankLabel?: string;
+  /** ショップの次回勝利2倍バフを消費してレート増分が2倍だった */
+  ratingDoubledApplied?: boolean;
 };
 
 export default function Home() {
@@ -101,8 +102,8 @@ export default function Home() {
   const submitDoneRoundRef = useRef<string | null>(null);
   /** null = 読み込み中 */
   const [totalGold, setTotalGold] = useState<number | null>(null);
-  /** Firestore lifetime_total_rate（累計・ランク表示の基準） */
-  const [lifetimeTotalRate, setLifetimeTotalRate] = useState<number | null>(
+  /** Firestore current_rate（シーズン・ランク表示の基準） */
+  const [seasonRatingForRank, setSeasonRatingForRank] = useState<number | null>(
     null
   );
   const [userProfileLoading, setUserProfileLoading] = useState(true);
@@ -130,7 +131,7 @@ export default function Home() {
       const uid = auth.currentUser?.uid;
       if (!uid) {
         setTotalGold(0);
-        setLifetimeTotalRate(null);
+        setSeasonRatingForRank(null);
         setUserProfileLoading(false);
         return;
       }
@@ -138,25 +139,24 @@ export default function Home() {
       const snap = await getDoc(doc(db, "users", uid));
       if (!snap.exists()) {
         setTotalGold(0);
-        setLifetimeTotalRate(DEFAULT_INITIAL_RATING);
+        setSeasonRatingForRank(DEFAULT_INITIAL_RATING);
         setUserProfileLoading(false);
         return;
       }
       const d = snap.data();
       const g =
         typeof d?.gold === "number" && Number.isFinite(d.gold) ? d.gold : 0;
-      const lifetime =
-        typeof d?.lifetime_total_rate === "number" &&
-        Number.isFinite(d.lifetime_total_rate)
-          ? d.lifetime_total_rate
+      const season =
+        typeof d?.current_rate === "number" && Number.isFinite(d.current_rate)
+          ? d.current_rate
           : typeof d?.rating === "number" && Number.isFinite(d.rating)
             ? d.rating
             : DEFAULT_INITIAL_RATING;
       setTotalGold(g);
-      setLifetimeTotalRate(lifetime);
+      setSeasonRatingForRank(season);
     } catch {
       setTotalGold(0);
-      setLifetimeTotalRate(DEFAULT_INITIAL_RATING);
+      setSeasonRatingForRank(DEFAULT_INITIAL_RATING);
     } finally {
       setUserProfileLoading(false);
     }
@@ -420,12 +420,12 @@ export default function Home() {
           ratingDelta?: number;
           playerRatingBefore?: number;
           playerRatingAfter?: number;
-          weeklyResetApplied?: boolean;
           characterAverageHands?: number;
           goldEarned?: number;
           goldTotal?: number;
-          lifetimeTierPromoted?: boolean;
+          seasonTierPromoted?: boolean;
           promotedToRankLabel?: string;
+          ratingDoubledApplied?: boolean;
         };
 
         if (cancelled) return;
@@ -452,7 +452,6 @@ export default function Home() {
           after,
           delta,
           alreadySubmitted: Boolean(json.alreadySubmitted),
-          weeklyResetApplied: Boolean(json.weeklyResetApplied),
           characterAverageHands:
             typeof json.characterAverageHands === "number"
               ? json.characterAverageHands
@@ -461,11 +460,12 @@ export default function Home() {
             typeof json.goldEarned === "number" ? json.goldEarned : undefined,
           goldTotal:
             typeof json.goldTotal === "number" ? json.goldTotal : undefined,
-          lifetimeTierPromoted: Boolean(json.lifetimeTierPromoted),
+          seasonTierPromoted: Boolean(json.seasonTierPromoted),
           promotedToRankLabel:
             typeof json.promotedToRankLabel === "string"
               ? json.promotedToRankLabel
               : undefined,
+          ratingDoubledApplied: Boolean(json.ratingDoubledApplied),
         });
       } catch (e: unknown) {
         if (!cancelled) {
@@ -575,7 +575,7 @@ export default function Home() {
           </Link>
 
           <MyRankStatus
-            lifetimeTotalRate={lifetimeTotalRate}
+            seasonRating={seasonRatingForRank}
             loading={userProfileLoading}
           />
 
@@ -714,13 +714,13 @@ export default function Home() {
                             です。同じ手数の時点ではまだ続行できます。
                           </li>
                           <li>
-                            正解すればクリアで週次レートは勝ち更新です。未正解のままゴーストの手数を超えたときだけ敗北し、それまでは予想を続けられます。ゴーストより少ない手数で当てるほどボーナスが増えます。
+                            正解すればクリアでシーズンレートは勝ち更新です。未正解のままゴーストの手数を超えたときだけ敗北し、それまでは予想を続けられます。ゴーストより少ない手数で当てるほどボーナスが増えます。
                           </li>
                           <li>
                             <span className="font-medium text-[#ece5d8]">個人モード</span>
                             ではゴーストは出ず、
                             <span className="font-medium text-amber-200/90">
-                              週次・累計レート・ゴールドは一切変動しません
+                              シーズンレート・ゴールドは一切変動しません
                             </span>
                             （練習向け）。
                           </li>
@@ -738,7 +738,7 @@ export default function Home() {
                       className="w-full rounded-lg px-2 py-2 text-left text-sm font-semibold text-amber-200/95 transition hover:bg-white/[0.06]"
                       aria-expanded={patchSection === "stats"}
                     >
-                      キャラ統計・累計レートについて
+                      キャラ統計・ランクについて
                     </button>
                     {patchSection === "stats" && (
                       <div className="space-y-2.5 border-t border-[#ece5d8]/10 px-2 pb-2 pt-3 leading-relaxed text-white/72">
@@ -753,15 +753,17 @@ export default function Home() {
                         </p>
                         <p>
                           <span className="font-semibold text-[#ece5d8]">
-                            累計レート（lifetime_total_rate）
+                            ランク表示
                           </span>
-                          は敗北や週次の減点では
-                          <span className="font-medium text-emerald-200/90">減りません</span>
-                          。勝ちで増えた分だけ上がります（ランク表示の基準）。上限は
+                          は
+                          <span className="font-medium text-[#ece5d8]">
+                            シーズンレート（対戦モード）
+                          </span>
+                          だけから決まります。ウォリアー〜ミシックは各ティア{" "}
                           <span className="tabular-nums font-medium text-amber-200/95">
-                            9999
-                          </span>
-                          です。週次レートの上限は従来どおりです。
+                            125
+                          </span>{" "}
+                          pt 幅で IV→III→II→I と昇格します。詳細はヘッダーの「ランク」から参照できます。
                         </p>
                       </div>
                     )}
@@ -781,18 +783,23 @@ export default function Home() {
                     {patchSection === "rate" && (
                       <div className="mt-2 border-t border-[#ece5d8]/10 px-2 pb-2 pt-3 text-[0.8125rem] leading-relaxed text-white/72 sm:text-sm">
                         <p className="font-semibold text-[#ece5d8]">
-                          キャラ平均手数がちょうど 4 手のとき
+                          勝ちのシーズンレート増分
                         </p>
                         <p className="mt-1.5 text-white/65">
-                          週次レートの「勝ち」は{" "}
+                          シーズンレート帯ごとの
+                          <span className="font-medium text-[#ece5d8]">基礎点</span>
+                          （1500 未満 +15／1500〜1999 +12／2000 以上 +10）に、
                           <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
-                            +6 + max(0, 平均−自分の手数)×2
+                            max(0, キャラ平均手数−自分の手数)×2
                           </span>
-                          （＋ゴーストがいる場合はさらに{" "}
+                          と、ゴーストがいるときは
                           <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
                             max(0, ゴースト手数−自分の手数)×2
                           </span>
-                          ）。平均が 4 のときの増分だけ抜き出すと次のとおりです。
+                          を加算します。
+                        </p>
+                        <p className="mt-2 font-semibold text-[#ece5d8]">
+                          例: キャラ平均 4 手・シーズンレート 1500〜1999（基礎 +12）
                         </p>
                         <div className="mt-2 overflow-x-auto">
                           <table className="w-full min-w-[16rem] border-collapse text-left text-[0.8125rem] tabular-nums sm:text-sm">
@@ -802,31 +809,31 @@ export default function Home() {
                                   正解までの手数
                                 </th>
                                 <th className="py-1 font-medium">
-                                  週次レート増分（勝ち）
+                                  シーズンレート増分（勝ち）
                                 </th>
                               </tr>
                             </thead>
                             <tbody className="text-white/80">
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">1</td>
-                                <td className="text-emerald-200/95">+12</td>
+                                <td className="text-emerald-200/95">+18</td>
                               </tr>
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">2</td>
-                                <td className="text-emerald-200/95">+10</td>
+                                <td className="text-emerald-200/95">+16</td>
                               </tr>
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">3</td>
-                                <td className="text-emerald-200/95">+8</td>
+                                <td className="text-emerald-200/95">+14</td>
                               </tr>
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">4</td>
-                                <td className="text-emerald-200/95">+6</td>
+                                <td className="text-emerald-200/95">+12</td>
                               </tr>
                               <tr className="border-b border-white/5">
                                 <td className="py-1 pr-3">5〜7</td>
                                 <td className="text-emerald-200/95">
-                                  +6（平均より遅いので速度ボーナスなし）
+                                  +12（平均より遅いので速度ボーナスなし）
                                 </td>
                               </tr>
                             </tbody>
@@ -834,24 +841,18 @@ export default function Home() {
                         </div>
                         <p className="mt-3 text-white/65">
                           <span className="font-semibold text-rose-300/90">負け</span>
-                          （不正解・降参・手数切れ・ゴースト敗北など）の週次レート減少は、
+                          （不正解・降参・手数切れ・ゴースト敗北など）のシーズンレート減少は、
                           <span className="font-medium text-[#ece5d8]">
-                            そのラウンドで何手使ったかではなく
+                            そのラウンドの手数によらず
                           </span>
-                          、いまのシーズンレートと期待勝率{" "}
-                          <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
-                            E
-                          </span>{" "}
-                          だけで決まります（手数 1〜7 で式は同じ）。相手レート 1500・自分の週次レートが
-                          1500 のときは{" "}
-                          <span className="tabular-nums text-rose-200/95">約 −16</span>
-                          、2000 のときは{" "}
-                          <span className="tabular-nums text-rose-200/95">約 −30</span>
-                          （いずれも{" "}
-                          <span className="font-mono text-[0.65rem] text-white/70 sm:text-xs">
-                            K=32
-                          </span>
-                          ・上限クリップ前）。
+                          、いまのシーズンレート帯だけで決まります：
+                          1500 未満{" "}
+                          <span className="tabular-nums text-rose-200/95">−5</span>
+                          ／1500〜1999{" "}
+                          <span className="tabular-nums text-rose-200/95">−8</span>
+                          ／2000 以上{" "}
+                          <span className="tabular-nums text-rose-200/95">−12</span>
+                          。
                         </p>
                       </div>
                     )}
@@ -1137,7 +1138,16 @@ export default function Home() {
               {target.name}
             </p>
 
-            {ratingStats?.lifetimeTierPromoted &&
+            {won &&
+              ratingStats?.ratingDoubledApplied &&
+              !ratingStats.alreadySubmitted &&
+              battleModeVs && (
+                <p className="mt-3 text-center text-sm font-medium text-amber-200/95">
+                  ショップバフ：レート増分が 2 倍で適用されました
+                </p>
+              )}
+
+            {ratingStats?.seasonTierPromoted &&
               !ratingStats.alreadySubmitted &&
               ratingStats.promotedToRankLabel && (
                 <div
@@ -1151,7 +1161,7 @@ export default function Home() {
                     {ratingStats.promotedToRankLabel}
                   </p>
                   <p className="mt-1.5 text-xs text-white/50">
-                    累計レートの到達で新しいティア／ランク帯に到達しました
+                    シーズンレートの到達で新しいティア／ランク帯に到達しました
                   </p>
                 </div>
               )}
@@ -1214,11 +1224,6 @@ export default function Home() {
                   >
                     レート変動
                   </p>
-                  {ratingStats.weeklyResetApplied && (
-                    <p className="mt-2 text-xs text-amber-200/85">
-                      週が切り替わったため、レートを1500から再計算しました。
-                    </p>
-                  )}
                   {ratingStats.alreadySubmitted ? (
                     <p
                       className={`mt-2 text-sm ${

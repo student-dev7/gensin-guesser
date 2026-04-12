@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { doc, getDoc, getFirestore } from "firebase/firestore";
 import { RankDetailView } from "@/components/RankDetailView";
-import { DEFAULT_INITIAL_RATING } from "@/lib/elo";
+import { DEFAULT_INITIAL_RATING } from "@/lib/rating";
 import { logAnalyticsEvent } from "@/lib/firebaseAnalytics";
 import {
   ensureAnonymousSession,
@@ -14,9 +14,6 @@ import { rateForRankDisplay } from "@/lib/rankUtils";
 
 export function RankDetailClient() {
   const [seasonRating, setSeasonRating] = useState<number | null>(null);
-  const [lifetimeTotalRate, setLifetimeTotalRate] = useState<number | null>(
-    null
-  );
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -33,7 +30,6 @@ export function RankDetailClient() {
         if (!uid) {
           if (!cancelled) {
             setSeasonRating(DEFAULT_INITIAL_RATING);
-            setLifetimeTotalRate(DEFAULT_INITIAL_RATING);
             setLoading(false);
           }
           return;
@@ -43,7 +39,6 @@ export function RankDetailClient() {
         if (!snap.exists()) {
           if (!cancelled) {
             setSeasonRating(DEFAULT_INITIAL_RATING);
-            setLifetimeTotalRate(DEFAULT_INITIAL_RATING);
             setLoading(false);
           }
           return;
@@ -55,21 +50,12 @@ export function RankDetailClient() {
             : typeof d?.rating === "number" && Number.isFinite(d.rating)
               ? d.rating
               : DEFAULT_INITIAL_RATING;
-        const lifetime =
-          typeof d?.lifetime_total_rate === "number" &&
-          Number.isFinite(d.lifetime_total_rate)
-            ? d.lifetime_total_rate
-            : typeof d?.rating === "number" && Number.isFinite(d.rating)
-              ? d.rating
-              : DEFAULT_INITIAL_RATING;
         if (!cancelled) {
           setSeasonRating(season);
-          setLifetimeTotalRate(lifetime);
         }
       } catch {
         if (!cancelled) {
           setSeasonRating(DEFAULT_INITIAL_RATING);
-          setLifetimeTotalRate(DEFAULT_INITIAL_RATING);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -81,7 +67,7 @@ export function RankDetailClient() {
     };
   }, []);
 
-  const rankRate = rateForRankDisplay(lifetimeTotalRate);
+  const rankRate = rateForRankDisplay(seasonRating);
 
   return (
     <div className="min-h-screen bg-[#0a0f1e] px-4 py-8 text-white sm:py-12">
@@ -94,7 +80,7 @@ export function RankDetailClient() {
             ランク詳細
           </h1>
           <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-white/55">
-            累計レートに基づくランク・ティア・昇格までのポイントを表示します。
+            シーズンレートに基づくランク・ティア・昇格までのポイントを表示します。
           </p>
           <div className="mt-8">
             <Link

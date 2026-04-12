@@ -8,11 +8,7 @@ import {
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
-import {
-  clampLifetimeTotalRate,
-  clampRating,
-  DEFAULT_INITIAL_RATING,
-} from "@/lib/elo";
+import { clampRating, DEFAULT_INITIAL_RATING } from "@/lib/rating";
 import { DEBUG_USER_UPDATED_EVENT } from "@/lib/debugUserEvents";
 import {
   ensureAnonymousSession,
@@ -24,7 +20,6 @@ export function DebugUserTools() {
   const { showAdminTools } = useAdminMode();
   const [open, setOpen] = useState(false);
   const [seasonDraft, setSeasonDraft] = useState("");
-  const [lifetimeDraft, setLifetimeDraft] = useState("");
   const [goldDraft, setGoldDraft] = useState("");
   const [loadingDoc, setLoadingDoc] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -47,7 +42,6 @@ export function DebugUserTools() {
       const snap = await getDoc(doc(db, "users", uid));
       if (!snap.exists()) {
         setSeasonDraft(String(DEFAULT_INITIAL_RATING));
-        setLifetimeDraft(String(DEFAULT_INITIAL_RATING));
         setGoldDraft("0");
         return;
       }
@@ -58,17 +52,9 @@ export function DebugUserTools() {
           : typeof d?.rating === "number" && Number.isFinite(d.rating)
             ? d.rating
             : DEFAULT_INITIAL_RATING;
-      const lifetime =
-        typeof d?.lifetime_total_rate === "number" &&
-        Number.isFinite(d.lifetime_total_rate)
-          ? d.lifetime_total_rate
-          : typeof d?.rating === "number" && Number.isFinite(d.rating)
-            ? d.rating
-            : DEFAULT_INITIAL_RATING;
       const g =
         typeof d?.gold === "number" && Number.isFinite(d.gold) ? d.gold : 0;
       setSeasonDraft(String(Math.round(season)));
-      setLifetimeDraft(String(Math.round(lifetime)));
       setGoldDraft(String(Math.round(g)));
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -95,24 +81,17 @@ export function DebugUserTools() {
         return;
       }
       const season = Number(seasonDraft);
-      const lifetime = Number(lifetimeDraft);
       const g = Number(goldDraft);
-      if (
-        !Number.isFinite(season) ||
-        !Number.isFinite(lifetime) ||
-        !Number.isFinite(g)
-      ) {
+      if (!Number.isFinite(season) || !Number.isFinite(g)) {
         setError("数値が不正です");
         return;
       }
       const cr = clampRating(season);
-      const lt = clampLifetimeTotalRate(lifetime);
       const db = getFirestore(auth.app);
       await setDoc(
         doc(db, "users", uid),
         {
           current_rate: cr,
-          lifetime_total_rate: lt,
           rating: cr,
           gold: Math.max(0, g),
           updatedAt: serverTimestamp(),
@@ -126,7 +105,7 @@ export function DebugUserTools() {
     } finally {
       setSaving(false);
     }
-  }, [seasonDraft, lifetimeDraft, goldDraft]);
+  }, [seasonDraft, goldDraft]);
 
   if (!showAdminTools) return null;
 
@@ -183,19 +162,6 @@ export function DebugUserTools() {
                   inputMode="numeric"
                   value={seasonDraft}
                   onChange={(e) => setSeasonDraft(e.target.value)}
-                  disabled={loadingDoc}
-                  className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm tabular-nums text-white outline-none focus:border-rose-400/50"
-                />
-              </label>
-              <label className="block">
-                <span className="text-xs text-white/60">
-                  累計レート（lifetime_total_rate）
-                </span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  value={lifetimeDraft}
-                  onChange={(e) => setLifetimeDraft(e.target.value)}
                   disabled={loadingDoc}
                   className="mt-1 w-full rounded-lg border border-white/15 bg-black/30 px-3 py-2 text-sm tabular-nums text-white outline-none focus:border-rose-400/50"
                 />

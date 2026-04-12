@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { RankingAvatar } from "@/components/RankingAvatar";
 import { RankLogoMark } from "@/components/RankLogoMark";
+import { isAdminUid } from "@/lib/adminUids";
+import { RANK_BAND_WIDTH_PT } from "@/lib/rankUtils";
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
@@ -30,6 +32,19 @@ export function RankingTable({ rows, error }: Props) {
   const [resetConfirm, setResetConfirm] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
   const [resetMessage, setResetMessage] = useState<string | null>(null);
+  const [massDownOpen, setMassDownOpen] = useState(false);
+  const [massDownPass, setMassDownPass] = useState("");
+  const [massDownLoading, setMassDownLoading] = useState(false);
+  const [massDownMessage, setMassDownMessage] = useState<string | null>(null);
+  const [massDown500Open, setMassDown500Open] = useState(false);
+  const [massDown500Pass, setMassDown500Pass] = useState("");
+  const [massDown500Loading, setMassDown500Loading] = useState(false);
+  const [massDown500Message, setMassDown500Message] = useState<string | null>(
+    null
+  );
+
+  const isAdmin =
+    typeof myUid === "string" && myUid.length > 0 && isAdminUid(myUid);
 
   useEffect(() => {
     let cancelled = false;
@@ -61,10 +76,10 @@ export function RankingTable({ rows, error }: Props) {
             Firestore のユーザー別レート上位 50 名です。
           </p>
           <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-white/40">
-            レートは日本時間で週が切り替わるたび（月曜始まり）に 1500
-            へリセットされ、以降の対戦から再計算されます。
+            2 週間に 1 度、全員のシーズンレートが 1 ランク分（500pt）ダウンします。次回実行は4月27日です。自分だけ
+            1500 に戻す場合は下のボタンを使えます。
           </p>
-          <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:justify-center">
+          <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:flex-wrap sm:justify-center">
             <Link
               href="/"
               className="inline-flex items-center justify-center rounded-full border border-[#ece5d8]/35 bg-[#12182a] px-6 py-2.5 text-sm font-medium text-[#ece5d8] shadow-[0_0_24px_-8px_rgba(236,229,216,0.25)] transition hover:border-[#ece5d8]/55 hover:bg-[#1a2238]"
@@ -80,8 +95,34 @@ export function RankingTable({ rows, error }: Props) {
               }}
               className="inline-flex items-center justify-center rounded-full border border-rose-500/45 bg-rose-950/35 px-6 py-2.5 text-sm font-medium text-rose-200/95 shadow-sm transition hover:border-rose-400/60 hover:bg-rose-950/55"
             >
-              週次レートをリセット
+              自分のレートを 1500 に戻す
             </button>
+            {isAdmin && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMassDown500Open(true);
+                    setMassDown500Pass("");
+                    setMassDown500Message(null);
+                  }}
+                  className="inline-flex items-center justify-center rounded-full border border-amber-500/50 bg-amber-950/40 px-6 py-2.5 text-sm font-medium text-amber-200/95 shadow-sm transition hover:border-amber-400/65 hover:bg-amber-950/60"
+                >
+                  管理者：全員 −500pt
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMassDownOpen(true);
+                    setMassDownPass("");
+                    setMassDownMessage(null);
+                  }}
+                  className="inline-flex items-center justify-center rounded-full border border-amber-500/50 bg-amber-950/40 px-6 py-2.5 text-sm font-medium text-amber-200/95 shadow-sm transition hover:border-amber-400/65 hover:bg-amber-950/60"
+                >
+                  管理者：全員 6 ティア分下げる
+                </button>
+              </>
+            )}
           </div>
         </header>
 
@@ -101,12 +142,12 @@ export function RankingTable({ rows, error }: Props) {
                 id="reset-rating-title"
                 className="text-lg font-semibold text-[#ece5d8]"
               >
-                週次レートのリセット
+                自分のレートを初期値に戻す
               </h2>
               <p className="mt-2 text-sm leading-relaxed text-white/60">
-                表示用の週次レート（
+                あなたのアカウントのシーズンレート（
                 <span className="text-[#ece5d8]/90">current_rate / rating</span>
-                ）を 1500 に戻します。累計レートは変わりません。実行するには下に{" "}
+                ）を 1500 に戻します。ランク表示もリセット後のレートに合わせて変わります。実行するには下に{" "}
                 <span className="font-mono text-amber-200/95">quit</span>{" "}
                 と入力してください。
               </p>
@@ -175,6 +216,218 @@ export function RankingTable({ rows, error }: Props) {
                   className="rounded-xl border border-rose-500/50 bg-rose-900/40 px-4 py-2 text-sm font-medium text-rose-100 transition hover:bg-rose-900/60 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {resetLoading ? "処理中…" : "リセットする"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {massDown500Open && (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mass-down-500-title"
+            onClick={() => setMassDown500Open(false)}
+          >
+            <div
+              className="w-full max-w-md rounded-2xl border border-amber-500/35 bg-[#12182a] p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2
+                id="mass-down-500-title"
+                className="text-lg font-semibold text-amber-200/95"
+              >
+                全ユーザーのシーズンレートを −500
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-white/60">
+                全員の{" "}
+                <span className="text-[#ece5d8]/90">current_rate / rating</span>{" "}
+                から{" "}
+                <span className="tabular-nums text-amber-200/95">
+                  {RANK_BAND_WIDTH_PT}
+                </span>{" "}
+                pt（1 ランク帯相当）を減算し、下限 1500 で打ち止めします。
+              </p>
+              <p className="mt-2 text-xs text-amber-200/75">
+                実行するには下に{" "}
+                <span className="font-mono text-amber-200/95">down</span>{" "}
+                と入力してください（6 ティア一括と同じ）。
+              </p>
+              <input
+                value={massDown500Pass}
+                onChange={(e) => setMassDown500Pass(e.target.value)}
+                autoComplete="off"
+                placeholder="down"
+                className="mt-4 w-full rounded-xl border border-[#ece5d8]/20 bg-[#0a0f1e] px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-amber-400/45"
+              />
+              {massDown500Message && (
+                <p className="mt-2 text-sm text-rose-400">{massDown500Message}</p>
+              )}
+              <div className="mt-6 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMassDown500Open(false)}
+                  className="rounded-xl px-4 py-2 text-sm text-white/70 transition hover:bg-white/10"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  disabled={massDown500Loading}
+                  onClick={async () => {
+                    setMassDown500Message(null);
+                    if (massDown500Pass.trim().toLowerCase() !== "down") {
+                      setMassDown500Message(
+                        "「down」と正確に入力してください"
+                      );
+                      return;
+                    }
+                    setMassDown500Loading(true);
+                    try {
+                      await ensureAnonymousSession();
+                      const auth = getFirebaseAuth();
+                      const idToken = await auth.currentUser?.getIdToken();
+                      if (!idToken) {
+                        setMassDown500Message("ログインが必要です");
+                        return;
+                      }
+                      const res = await fetch(
+                        "/api/admin/mass-down-500-season-rating",
+                        {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            idToken,
+                            pass: massDown500Pass.trim(),
+                          }),
+                        }
+                      );
+                      const json = (await res.json()) as {
+                        ok?: boolean;
+                        error?: string;
+                        userCount?: number;
+                      };
+                      if (!json?.ok) {
+                        setMassDown500Message(
+                          json?.error ?? "処理に失敗しました"
+                        );
+                        return;
+                      }
+                      setMassDown500Open(false);
+                      router.refresh();
+                    } catch (e: unknown) {
+                      setMassDown500Message(
+                        e instanceof Error ? e.message : String(e)
+                      );
+                    } finally {
+                      setMassDown500Loading(false);
+                    }
+                  }}
+                  className="rounded-xl border border-amber-500/50 bg-amber-900/50 px-4 py-2 text-sm font-medium text-amber-100 transition hover:bg-amber-900/70 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {massDown500Loading ? "処理中…" : "実行する"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {massDownOpen && (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mass-down-title"
+            onClick={() => setMassDownOpen(false)}
+          >
+            <div
+              className="w-full max-w-md rounded-2xl border border-amber-500/35 bg-[#12182a] p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2
+                id="mass-down-title"
+                className="text-lg font-semibold text-amber-200/95"
+              >
+                全ユーザーのシーズンレートを下げる
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-white/60">
+                全員の <span className="text-[#ece5d8]/90">current_rate / rating</span>{" "}
+                から <span className="tabular-nums text-amber-200/95">750</span>{" "}
+                pt（ティア 6 段・約 1.5 ランク相当）を減算し、下限 1500
+                で打ち止めします。Firestore の読み書きが発生するため、ユーザー数に比例してクォータを消費します。
+              </p>
+              <p className="mt-2 text-xs text-amber-200/75">
+                実行するには下に{" "}
+                <span className="font-mono text-amber-200/95">down</span>{" "}
+                と入力してください。
+              </p>
+              <input
+                value={massDownPass}
+                onChange={(e) => setMassDownPass(e.target.value)}
+                autoComplete="off"
+                placeholder="down"
+                className="mt-4 w-full rounded-xl border border-[#ece5d8]/20 bg-[#0a0f1e] px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-amber-400/45"
+              />
+              {massDownMessage && (
+                <p className="mt-2 text-sm text-rose-400">{massDownMessage}</p>
+              )}
+              <div className="mt-6 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMassDownOpen(false)}
+                  className="rounded-xl px-4 py-2 text-sm text-white/70 transition hover:bg-white/10"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  disabled={massDownLoading}
+                  onClick={async () => {
+                    setMassDownMessage(null);
+                    if (massDownPass.trim().toLowerCase() !== "down") {
+                      setMassDownMessage("「down」と正確に入力してください");
+                      return;
+                    }
+                    setMassDownLoading(true);
+                    try {
+                      await ensureAnonymousSession();
+                      const auth = getFirebaseAuth();
+                      const idToken = await auth.currentUser?.getIdToken();
+                      if (!idToken) {
+                        setMassDownMessage("ログインが必要です");
+                        return;
+                      }
+                      const res = await fetch("/api/admin/mass-down-season-rating", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          idToken,
+                          pass: massDownPass.trim(),
+                        }),
+                      });
+                      const json = (await res.json()) as {
+                        ok?: boolean;
+                        error?: string;
+                        userCount?: number;
+                      };
+                      if (!json?.ok) {
+                        setMassDownMessage(json?.error ?? "処理に失敗しました");
+                        return;
+                      }
+                      setMassDownOpen(false);
+                      router.refresh();
+                    } catch (e: unknown) {
+                      setMassDownMessage(
+                        e instanceof Error ? e.message : String(e)
+                      );
+                    } finally {
+                      setMassDownLoading(false);
+                    }
+                  }}
+                  className="rounded-xl border border-amber-500/50 bg-amber-900/50 px-4 py-2 text-sm font-medium text-amber-100 transition hover:bg-amber-900/70 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {massDownLoading ? "処理中…" : "実行する"}
                 </button>
               </div>
             </div>

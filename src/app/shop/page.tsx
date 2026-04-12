@@ -4,7 +4,7 @@ import { ShopClient } from "./ShopClient";
 export const metadata: Metadata = {
   title: "ショップ",
   description:
-    "原神ゲッサーのゴールドショップ。アイコンフレームなどの購入（準備中）。",
+    "原神ゲッサーのゴールドショップ。次回勝利レート2倍バフなど。",
   alternates: {
     canonical: "/shop",
   },

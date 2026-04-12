@@ -13,23 +13,21 @@ import {
 } from "@/lib/characterStats";
 import {
   applyWinRatingBonus,
-  clampLifetimeTotalRate,
   clampRating,
-  computeNewPlayerRating,
+  computeFixedLossRating,
   DEFAULT_INITIAL_RATING,
-  expectedScore,
-} from "@/lib/elo";
+} from "@/lib/rating";
 import { getPublicFirestore } from "@/lib/firebasePublicFirestore";
 import { withUserFirestore } from "@/lib/firebaseUserFirestore";
 import { getUidFromIdToken } from "@/lib/identityToolkit";
-import { getRatingWeekMondayKeyJst } from "@/lib/ratingWeek";
 import { goldEarnedFromRatingDelta } from "@/lib/gold";
 import {
   formatRankTierLine,
   getRankData,
-  isLifetimeTierOrRankPromoted,
+  isSeasonTierOrRankPromoted,
 } from "@/lib/rankUtils";
 import { isAdminUid } from "@/lib/adminUids";
+import { USER_FIELD_NEXT_WIN_RATING_DOUBLE } from "@/lib/shop";
 import { validateDisplayName } from "@/lib/validateDisplayName";
 
 type SubmitBody = {
@@ -46,7 +44,7 @@ type SubmitBody = {
   lostToGhost?: boolean;
   /** 降参した場合 true（キャラ統計の手数は 7 手として計上） */
   surrendered?: boolean;
-  /** 個人モード: 週次・累計レート・ゴールドは変えない */
+  /** 個人モード: シーズンレート・ゴールドは変えない */
   personalMode?: boolean;
 };
 
@@ -86,17 +84,6 @@ function readSeasonRate(data: Record<string, unknown> | undefined): number {
   const legacy = data.rating;
   if (typeof legacy === "number" && Number.isFinite(legacy)) {
     return clampRating(legacy);
-  }
-  return DEFAULT_INITIAL_RATING;
-}
-
-function readLifetimeTotal(data: Record<string, unknown> | undefined): number {
-  if (!data) return DEFAULT_INITIAL_RATING;
-  const lt = data.lifetime_total_rate;
-  if (typeof lt === "number" && Number.isFinite(lt)) return clampLifetimeTotalRate(lt);
-  const legacy = data.rating;
-  if (typeof legacy === "number" && Number.isFinite(legacy)) {
-    return clampLifetimeTotalRate(legacy);
   }
   return DEFAULT_INITIAL_RATING;
 }
@@ -230,8 +217,6 @@ export async function POST(req: Request) {
     characterName
   )}`;
 
-  const currentWeekKey = getRatingWeekMondayKeyJst();
-
   try {
     const ghostHc = personalMode
       ? undefined
@@ -300,9 +285,8 @@ export async function POST(req: Request) {
             averageHandCount?: number;
             averageHandCountUsed?: number;
             storedHandCount?: number;
-            weeklyResetApplied?: boolean;
           };
-          const usedForElo =
+          const usedForAverage =
             typeof data.averageHandCountUsed === "number"
               ? data.averageHandCountUsed
               : typeof data.averageHandCount === "number"
@@ -317,18 +301,18 @@ export async function POST(req: Request) {
             playerRatingBefore:
               data.playerRatingBefore ?? DEFAULT_INITIAL_RATING,
             eloActualScore: 0,
-            averageHandCount: usedForElo,
+            averageHandCount: usedForAverage,
             characterAverageHands,
             storedHandCount:
               typeof data.storedHandCount === "number"
                 ? data.storedHandCount
                 : storedHandCount,
-            weeklyResetApplied: Boolean(data.weeklyResetApplied),
             guessCount,
             characterStatsUpdated: false,
             goldEarned: 0,
             goldTotal: goldTotalDup,
-            lifetimeTierPromoted: false,
+            seasonTierPromoted: false,
+            ratingDoubledApplied: false,
           };
         }
 
@@ -348,17 +332,7 @@ export async function POST(req: Request) {
           ? (userSnap.data() as Record<string, unknown>)
           : undefined;
 
-        let Rp = readSeasonRate(userData);
-        const lifetimeTotal = readLifetimeTotal(userData);
-
-        let weeklyResetApplied = false;
-        if (!personalMode && userSnap.exists()) {
-          const storedKey = userData?.ratingWeekKey as string | undefined;
-          if (storedKey !== undefined && storedKey !== currentWeekKey) {
-            Rp = DEFAULT_INITIAL_RATING;
-            weeklyResetApplied = true;
-          }
-        }
+        const Rp = readSeasonRate(userData);
 
         const gamesBefore = userSnap.exists()
           ? (userSnap.data()?.games as number | undefined) ?? 0
@@ -373,6 +347,9 @@ export async function POST(req: Request) {
 
         let newRating: number;
         let ratingDelta: number;
+        /** ショップ「次回勝利レート2倍」を消費して勝ちに適用したか */
+        let ratingDoubledApplied = false;
+        /** Firestore 互換: 旧 Elo 名残。勝ち 1 / 負け・個人 0。期待値は未使用のため 0 */
         let eloActualScore: number;
         let eloExpected: number;
         let winBaseBonus: number | undefined;
@@ -383,7 +360,7 @@ export async function POST(req: Request) {
           newRating = Rp;
           ratingDelta = 0;
           eloActualScore = 0;
-          eloExpected = expectedScore(Rp, DEFAULT_INITIAL_RATING);
+          eloExpected = 0;
           winBaseBonus = undefined;
           winSpeedBonus = undefined;
           ghostBeatBonus = undefined;
@@ -396,19 +373,30 @@ export async function POST(req: Request) {
               ? { ghostHandCount: ghostHc }
               : undefined
           );
-          newRating = win.newRating;
-          ratingDelta = win.ratingDelta;
-          winBaseBonus = win.baseBonus;
-          winSpeedBonus = win.speedBonus;
-          ghostBeatBonus = win.ghostBeatBonus;
+          const nextWinDouble =
+            userData?.[USER_FIELD_NEXT_WIN_RATING_DOUBLE] === true;
+          if (nextWinDouble) {
+            ratingDoubledApplied = true;
+            ratingDelta = win.ratingDelta * 2;
+            newRating = clampRating(Rp + ratingDelta);
+            winBaseBonus = win.baseBonus * 2;
+            winSpeedBonus = win.speedBonus * 2;
+            ghostBeatBonus = win.ghostBeatBonus * 2;
+          } else {
+            newRating = win.newRating;
+            ratingDelta = win.ratingDelta;
+            winBaseBonus = win.baseBonus;
+            winSpeedBonus = win.speedBonus;
+            ghostBeatBonus = win.ghostBeatBonus;
+          }
           eloActualScore = 1;
-          eloExpected = expectedScore(Rp, DEFAULT_INITIAL_RATING);
+          eloExpected = 0;
         } else {
-          const loss = computeNewPlayerRating(Rp, 0);
+          const loss = computeFixedLossRating(Rp);
           newRating = loss.newRating;
           ratingDelta = loss.ratingDelta;
-          eloActualScore = loss.S;
-          eloExpected = loss.E;
+          eloActualScore = 0;
+          eloExpected = 0;
         }
 
         const gamesAfter = gamesBefore + 1;
@@ -418,18 +406,10 @@ export async function POST(req: Request) {
           : goldEarnedFromRatingDelta(ratingDelta);
         const goldTotal = goldBefore + goldEarned;
 
-        /** 累計は減らさない（負け・減点時は週次のみ反映）。個人モードは累計も変えない */
-        const newLifetimeTotal = personalMode
-          ? lifetimeTotal
-          : clampLifetimeTotalRate(
-              lifetimeTotal + Math.max(0, ratingDelta)
-            );
-
-        const lifetimeTierPromoted =
-          !personalMode &&
-          isLifetimeTierOrRankPromoted(lifetimeTotal, newLifetimeTotal);
-        const promotedToRankLabel = lifetimeTierPromoted
-          ? formatRankTierLine(getRankData(newLifetimeTotal))
+        const seasonTierPromoted =
+          !personalMode && isSeasonTierOrRankPromoted(Rp, newRating);
+        const promotedToRankLabel = seasonTierPromoted
+          ? formatRankTierLine(getRankData(newRating))
           : undefined;
 
         if (personalMode) {
@@ -443,17 +423,20 @@ export async function POST(req: Request) {
             { merge: true }
           );
         } else {
+          const consumedNextWinDouble =
+            won && userData?.[USER_FIELD_NEXT_WIN_RATING_DOUBLE] === true;
           tx.set(
             userRef,
             {
               current_rate: newRating,
-              lifetime_total_rate: newLifetimeTotal,
               rating: newRating,
               games: gamesAfter,
               displayName,
-              ratingWeekKey: currentWeekKey,
               updatedAt: serverTimestamp(),
               ...(goldEarned > 0 ? { gold: increment(goldEarned) } : {}),
+              ...(consumedNextWinDouble
+                ? { [USER_FIELD_NEXT_WIN_RATING_DOUBLE]: false }
+                : {}),
             },
             { merge: true }
           );
@@ -473,14 +456,13 @@ export async function POST(req: Request) {
             eloExpected,
             playerRatingBefore: Rp,
             playerRatingAfter: newRating,
-            weeklyResetApplied,
             characterStatsUpdated: shouldIncrementCharacterStats,
             goldEarned,
             goldTotalAfter: goldTotal,
             personalMode,
             ...(won && !personalMode
               ? {
-                  winBaseBonus: winBaseBonus ?? 6,
+                  winBaseBonus: winBaseBonus ?? 0,
                   winSpeedBonus: winSpeedBonus ?? 0,
                   ghostBeatBonus: ghostBeatBonus ?? 0,
                 }
@@ -522,15 +504,15 @@ export async function POST(req: Request) {
           averageHandCount,
           characterAverageHands,
           storedHandCount,
-          weeklyResetApplied,
           guessCount,
           characterStatsUpdated: shouldIncrementCharacterStats,
           winBaseBonus,
           winSpeedBonus,
           goldEarned,
           goldTotal,
-          lifetimeTierPromoted,
+          seasonTierPromoted,
           promotedToRankLabel,
+          ratingDoubledApplied,
         };
       });
     });

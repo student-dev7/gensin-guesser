@@ -1,8 +1,7 @@
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { NextResponse } from "next/server";
-import { DEFAULT_INITIAL_RATING } from "@/lib/elo";
+import { DEFAULT_INITIAL_RATING } from "@/lib/rating";
 import { getUidFromIdToken } from "@/lib/identityToolkit";
-import { getRatingWeekMondayKeyJst } from "@/lib/ratingWeek";
 import { withUserFirestore } from "@/lib/firebaseUserFirestore";
 
 type Body = {
@@ -37,8 +36,6 @@ export async function POST(req: Request) {
       );
     }
 
-    const weekKey = getRatingWeekMondayKeyJst();
-
     await withUserFirestore(idToken, async (db) => {
       const userRef = doc(db, "users", uid);
       await setDoc(
@@ -46,7 +43,6 @@ export async function POST(req: Request) {
         {
           current_rate: DEFAULT_INITIAL_RATING,
           rating: DEFAULT_INITIAL_RATING,
-          ratingWeekKey: weekKey,
           updatedAt: serverTimestamp(),
         },
         { merge: true }

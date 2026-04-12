@@ -28,7 +28,7 @@ import {
   getFirebaseAuth,
 } from "../lib/firebaseClient";
 import { RankLogoMark } from "./RankLogoMark";
-import { DEFAULT_INITIAL_RATING } from "../lib/elo";
+import { DEFAULT_INITIAL_RATING } from "../lib/rating";
 import {
   formatRankTierLine,
   getRankData,
@@ -92,9 +92,9 @@ export function ChatRoomPanel(props: {
   const [myUid, setMyUid] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [clearingAll, setClearingAll] = useState(false);
-  /** uid → 累計レート由来のランク表示ラベル（再レンダー用に tick と併用） */
+  /** uid → シーズンレート由来のランク表示ラベル（再レンダー用に tick と併用） */
   const rankLabelRef = useRef<Record<string, string>>({});
-  /** ランクロゴ用（rateForRankDisplay 済みの累計レート） */
+  /** ランクロゴ用（rateForRankDisplay 済みのシーズンレート） */
   const rankDisplayRatingRef = useRef<Record<string, number | undefined>>({});
   const [rankLabelsTick, setRankLabelsTick] = useState(0);
 
@@ -213,25 +213,25 @@ export function ChatRoomPanel(props: {
           missing.map(async (uid) => {
             try {
               const snap = await getDoc(doc(db, "users", uid));
-              let lt = DEFAULT_INITIAL_RATING;
+              let season = DEFAULT_INITIAL_RATING;
               if (snap.exists()) {
                 const d = snap.data() as {
-                  lifetime_total_rate?: unknown;
+                  current_rate?: unknown;
                   rating?: unknown;
                 };
                 if (
-                  typeof d.lifetime_total_rate === "number" &&
-                  Number.isFinite(d.lifetime_total_rate)
+                  typeof d.current_rate === "number" &&
+                  Number.isFinite(d.current_rate)
                 ) {
-                  lt = d.lifetime_total_rate;
+                  season = d.current_rate;
                 } else if (
                   typeof d.rating === "number" &&
                   Number.isFinite(d.rating)
                 ) {
-                  lt = d.rating;
+                  season = d.rating;
                 }
               }
-              const displayRate = rateForRankDisplay(lt);
+              const displayRate = rateForRankDisplay(season);
               rankDisplayRatingRef.current[uid] = displayRate;
               rankLabelRef.current[uid] = formatRankTierLine(
                 getRankData(displayRate)

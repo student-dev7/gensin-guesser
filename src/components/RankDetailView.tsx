@@ -3,12 +3,15 @@
 import Image from "next/image";
 import { useState } from "react";
 import { RankEmblemByRankId } from "@/components/RankLogoMark";
+import { MAX_RATING } from "@/lib/rating";
 import {
   getRankAccentHex,
   getRankData,
   getRankLogoContentScale,
   getRankRangeTableRows,
-  getTierBarFromLifetimeRate,
+  getTierBarFromSeasonRate,
+  MYTHIC_GLORY_MIN,
+  RANK_TIER_WIDTH_PT,
 } from "@/lib/rankUtils";
 
 type Props = {
@@ -17,14 +20,14 @@ type Props = {
 };
 
 /**
- * ランク詳細の本文（全画面ページ用）。累計レート・シーズンレートは呼び出し元で用意する。
+ * ランク詳細の本文（全画面ページ用）。シーズンレートは呼び出し元で用意する。
  */
 export function RankDetailView(props: Props) {
   const { rankDisplayRating, seasonRating } = props;
   const [logoOk, setLogoOk] = useState(true);
 
   const data = getRankData(rankDisplayRating);
-  const tierBar = getTierBarFromLifetimeRate(rankDisplayRating);
+  const tierBar = getTierBarFromSeasonRate(rankDisplayRating);
   const accent = getRankAccentHex(data.rankId);
   const logoContentScale = getRankLogoContentScale(data.rankId);
   const rows = getRankRangeTableRows();
@@ -67,7 +70,7 @@ export function RankDetailView(props: Props) {
               <span className="font-semibold tabular-nums text-[#ece5d8]">
                 {tierBar.pointsToNext}
               </span>{" "}
-              ポイント（累計レートベース）
+              ポイント（シーズンレートベース）
             </p>
 
             <div className="rounded-xl border border-[#ece5d8]/12 bg-[#0d1324]/80 px-3.5 py-3 sm:px-4">
@@ -131,13 +134,15 @@ export function RankDetailView(props: Props) {
         </div>
         <div className="w-full">
           <p className="text-sm tabular-nums text-[#ece5d8]/90">
-            累計レート: {Math.round(rankDisplayRating)}
+            シーズンレート: {Math.round(seasonRating ?? rankDisplayRating)}
           </p>
-          {seasonRating != null && (
-            <p className="mt-1 text-xs tabular-nums text-white/45">
-              シーズンレート: {Math.round(seasonRating)}
-            </p>
-          )}
+          <p className="mt-1 text-xs text-white/45">
+            ランク・ティアはシーズンレートのみで決まります（ティア幅{" "}
+            <span className="tabular-nums text-white/55">
+              {RANK_TIER_WIDTH_PT} pt
+            </span>
+            ／段、ウォリアー〜ミシック）。
+          </p>
         </div>
       </div>
 
@@ -147,21 +152,27 @@ export function RankDetailView(props: Props) {
         </p>
         <ul className="mt-2.5 list-disc space-y-1.5 pl-4 text-[0.8125rem] leading-relaxed text-white/65 marker:text-white/35">
           <li>
-            <span className="font-medium text-white/80">累計レート</span>
-            （試合の増減を積み上げた値）でランク帯が決まります。各帯内は{" "}
+            <span className="font-medium text-white/80">シーズンレート</span>
+            （対戦モードのレート）でランク帯が決まります。各帯内は{" "}
             <span className="tabular-nums text-white/80">IV→III→II→I</span>{" "}
             の順で上のティアへ昇格します。
           </li>
           <li>
-            シーズン用のレートは毎週リセットされますが、累計レートは{" "}
-            <span className="text-amber-200/90">リセットされません</span>。
+            ウォリアー〜ミシックは各ティア{" "}
+            <span className="tabular-nums font-medium text-white/80">
+              {RANK_TIER_WIDTH_PT} pt
+            </span>
+            幅です。ミシックグローリーは{" "}
+            <span className="tabular-nums text-white/80">
+              {MYTHIC_GLORY_MIN} 〜 {MAX_RATING}
+            </span>{" "}
+            の単一帯です。
           </li>
           <li>
-            「あと◯ポイント」は累計レートから算出します。シーズンレートは対戦計算用で、ランク表示には使いません。
+            2 週間に 1 度、全員のシーズンレートが 1 ランク分（500pt）ダウンします。次回実行は4月27日です。
           </li>
           <li>
-            ティア内の進捗は累計レートのみから計算します（ウォリアーは 1
-            ティアあたり幅 30）。ランク帯ごとに幅は異なります。
+            「あと◯ポイント」はシーズンレートから算出します。
           </li>
         </ul>
       </section>
@@ -177,6 +188,9 @@ export function RankDetailView(props: Props) {
                 <th className="px-3 py-2 font-semibold sm:px-4">ランク</th>
                 <th className="px-3 py-2 text-right font-semibold sm:px-4">
                   必要レート
+                </th>
+                <th className="hidden px-3 py-2 text-right text-[0.65rem] font-semibold sm:table-cell sm:px-4">
+                  ティア幅
                 </th>
               </tr>
             </thead>
@@ -198,6 +212,9 @@ export function RankDetailView(props: Props) {
                   <td className="px-3 py-2.5 text-right tabular-nums text-white/60 sm:px-4">
                     {r.rangeLabel}
                   </td>
+                  <td className="hidden px-3 py-2.5 text-right text-[0.7rem] text-white/50 sm:table-cell sm:px-4">
+                    {r.tierWidthLabel}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -206,7 +223,7 @@ export function RankDetailView(props: Props) {
       </section>
 
       <p className="rounded-xl border border-amber-400/25 bg-amber-950/25 px-3 py-2.5 text-xs leading-relaxed text-amber-100/85">
-        累計レートが下がればランク表示も下がり得ます。週次リセットで下がるのはシーズンレートだけです。
+        負けでシーズンレートが下がればランク表示も下がり得ます。運営による一斉調整もあり得ます。
       </p>
     </div>
   );

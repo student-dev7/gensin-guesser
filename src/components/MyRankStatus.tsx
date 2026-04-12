@@ -4,6 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useState } from "react";
 import {
+  formatRankTierLine,
   getRankAccentHex,
   getRankData,
   getRankLogoContentScale,
@@ -11,16 +12,16 @@ import {
 } from "@/lib/rankUtils";
 
 type Props = {
-  /** 累計レート lifetime_total_rate（ランク・昇格表示の基準） */
-  lifetimeTotalRate: number | null;
+  /** シーズンレート current_rate（ランク表示の基準） */
+  seasonRating: number | null;
   loading: boolean;
 };
 
 export function MyRankStatus(props: Props) {
-  const { lifetimeTotalRate, loading } = props;
+  const { seasonRating, loading } = props;
   const [logoOk, setLogoOk] = useState(true);
 
-  const rankRate = rateForRankDisplay(lifetimeTotalRate);
+  const rankRate = rateForRankDisplay(seasonRating);
 
   const data = getRankData(rankRate);
   const accent = getRankAccentHex(data.rankId);
@@ -73,6 +74,11 @@ export function MyRankStatus(props: Props) {
         <span className="select-none text-[0.62rem] font-medium tracking-wide text-[#ece5d8]/65 sm:text-[0.65rem]">
           ランク
         </span>
+        {!loading && (
+          <span className="max-w-[5.5rem] truncate text-center text-[0.58rem] leading-tight text-[#ece5d8]/50 sm:max-w-[6.5rem] sm:text-[0.6rem]">
+            {formatRankTierLine(data)}
+          </span>
+        )}
       </Link>
     </section>
   );
