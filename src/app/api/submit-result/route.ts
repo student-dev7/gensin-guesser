@@ -1,23 +1,25 @@
 import { NextResponse } from "next/server";
 import {
   doc,
+  getDoc,
   increment,
   runTransaction,
   serverTimestamp,
 } from "firebase/firestore";
 import {
-  bayesianMeanHands,
   characterStatsDocId,
   DEFAULT_AVG_HANDS,
-  MIN_HANDS_FOR_STATS,
+  pureMeanHandCount,
 } from "@/lib/characterStats";
 import {
   applyWinRatingBonus,
+  clampLifetimeTotalRate,
   clampRating,
   computeNewPlayerRating,
   DEFAULT_INITIAL_RATING,
   expectedScore,
 } from "@/lib/elo";
+import { getPublicFirestore } from "@/lib/firebasePublicFirestore";
 import { withUserFirestore } from "@/lib/firebaseUserFirestore";
 import { getUidFromIdToken } from "@/lib/identityToolkit";
 import { getRatingWeekMondayKeyJst } from "@/lib/ratingWeek";
@@ -37,12 +39,42 @@ type SubmitBody = {
   characterName: string;
   roundId: string;
   displayName: string;
+  /** /api/get-ghost が返した runs のドキュメント ID（検証用） */
+  ghostRunId?: string;
+  /** ゴーストの手数に達しても未正解のときの即敗北（サーバーで ghost と照合） */
+  lostToGhost?: boolean;
+  /** 降参した場合 true（キャラ統計の手数は 7 手として計上） */
+  surrendered?: boolean;
 };
 
 /** 降参・手数切れなど won:false の runs 記録用ペナルティ手数 */
 const LOSS_RECORD_HANDS = 7;
 const MAX_GUESSES_ROUND = 7;
 const MIN_GUESSES_TO_RESIGN = 4;
+
+async function resolveGhostHandCount(
+  characterName: string,
+  ghostRunId: string | undefined
+): Promise<number | undefined> {
+  if (!ghostRunId) return undefined;
+  const trimmed = ghostRunId.trim();
+  if (trimmed.length < 5 || trimmed.length > 1900) return undefined;
+  try {
+    const db = getPublicFirestore();
+    const snap = await getDoc(doc(db, "runs", trimmed));
+    if (!snap.exists()) return undefined;
+    const gd = snap.data() as Record<string, unknown>;
+    if (gd.characterName !== characterName) return undefined;
+    if (gd.won !== true) return undefined;
+    const hc = gd.handCount;
+    if (typeof hc !== "number" || !Number.isFinite(hc)) return undefined;
+    const rounded = Math.round(hc);
+    if (rounded < 1 || rounded > MAX_GUESSES_ROUND) return undefined;
+    return rounded;
+  } catch {
+    return undefined;
+  }
+}
 
 function readSeasonRate(data: Record<string, unknown> | undefined): number {
   if (!data) return DEFAULT_INITIAL_RATING;
@@ -58,10 +90,10 @@ function readSeasonRate(data: Record<string, unknown> | undefined): number {
 function readLifetimeTotal(data: Record<string, unknown> | undefined): number {
   if (!data) return DEFAULT_INITIAL_RATING;
   const lt = data.lifetime_total_rate;
-  if (typeof lt === "number" && Number.isFinite(lt)) return clampRating(lt);
+  if (typeof lt === "number" && Number.isFinite(lt)) return clampLifetimeTotalRate(lt);
   const legacy = data.rating;
   if (typeof legacy === "number" && Number.isFinite(legacy)) {
-    return clampRating(legacy);
+    return clampLifetimeTotalRate(legacy);
   }
   return DEFAULT_INITIAL_RATING;
 }
@@ -76,7 +108,10 @@ export async function POST(req: Request) {
     characterName,
     roundId,
     displayName: rawDisplayName,
+    ghostRunId: rawGhostRunId,
   } = body ?? ({} as SubmitBody);
+
+  const surrendered = body.surrendered === true;
 
   if (!idToken || typeof idToken !== "string") {
     return NextResponse.json(
@@ -111,23 +146,34 @@ export async function POST(req: Request) {
     );
   }
 
+  const lostToGhostClaim = body.lostToGhost === true;
+
   if (
     !won &&
     guessCount < MIN_GUESSES_TO_RESIGN &&
     guessCount !== MAX_GUESSES_ROUND
   ) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "降参は4回以上予想してから可能です（手数切れを除く）",
-      },
-      { status: 400 }
-    );
+    if (!lostToGhostClaim) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "降参は4回以上予想してから可能です（手数切れを除く）",
+        },
+        { status: 400 }
+      );
+    }
   }
 
   if (won && Math.round(rawHandCount) !== guessCount) {
     return NextResponse.json(
       { ok: false, error: "handCount and guessCount must match when won" },
+      { status: 400 }
+    );
+  }
+
+  if (surrendered && won) {
+    return NextResponse.json(
+      { ok: false, error: "surrendered cannot be true when won" },
       { status: 400 }
     );
   }
@@ -171,13 +217,34 @@ export async function POST(req: Request) {
       );
     }
 
+    const ghostHc = await resolveGhostHandCount(
+      characterName,
+      typeof rawGhostRunId === "string" ? rawGhostRunId : undefined
+    );
+
+    if (lostToGhostClaim) {
+      if (
+        typeof rawGhostRunId !== "string" ||
+        !rawGhostRunId.trim() ||
+        ghostHc === undefined ||
+        won ||
+        guessCount <= ghostHc
+      ) {
+        return NextResponse.json(
+          { ok: false, error: "Invalid lostToGhost" },
+          { status: 400 }
+        );
+      }
+    }
+
     const storedHandCount = won ? Math.max(1, rawHandCount) : LOSS_RECORD_HANDS;
-    /** キャラ別平均手数用。負けは実際の予想回数、勝ちは 1 手以上 */
+    /** キャラ別平均: 勝ちは実手数、降参は 7 手、他の負けは実際の予想回数（勝敗・敗北種別すべて集計） */
     const statHandCountForCharacter = won
       ? Math.max(1, Math.round(rawHandCount))
-      : guessCount;
-    const shouldIncrementCharacterStats =
-      !won || statHandCountForCharacter >= MIN_HANDS_FOR_STATS;
+      : surrendered
+        ? LOSS_RECORD_HANDS
+        : guessCount;
+    const shouldIncrementCharacterStats = true;
 
     const result = await withUserFirestore(idToken, async (db) => {
       const userRef = doc(db, "users", uid);
@@ -207,7 +274,7 @@ export async function POST(req: Request) {
           const twDup = charStatsSnapDup.exists()
             ? (charStatsSnapDup.data()?.totalWins as number | undefined) ?? 0
             : 0;
-          const characterAverageHands = bayesianMeanHands(thDup, twDup);
+          const characterAverageHands = pureMeanHandCount(thDup, twDup);
 
           const data = existingRun.data() as {
             playerRatingAfter?: number;
@@ -257,7 +324,7 @@ export async function POST(req: Request) {
           ? (charStatsSnap.data()?.totalWins as number | undefined) ?? 0
           : 0;
 
-        const averageHandCount = bayesianMeanHands(totalHandCount, totalWins);
+        const averageHandCount = pureMeanHandCount(totalHandCount, totalWins);
 
         const userData = userSnap.exists()
           ? (userSnap.data() as Record<string, unknown>)
@@ -292,17 +359,22 @@ export async function POST(req: Request) {
         let eloExpected: number;
         let winBaseBonus: number | undefined;
         let winSpeedBonus: number | undefined;
+        let ghostBeatBonus: number | undefined;
 
         if (won) {
           const win = applyWinRatingBonus(
             Rp,
             averageHandCount,
-            storedHandCount
+            storedHandCount,
+            ghostHc !== undefined
+              ? { ghostHandCount: ghostHc }
+              : undefined
           );
           newRating = win.newRating;
           ratingDelta = win.ratingDelta;
           winBaseBonus = win.baseBonus;
           winSpeedBonus = win.speedBonus;
+          ghostBeatBonus = win.ghostBeatBonus;
           eloActualScore = 1;
           eloExpected = expectedScore(Rp, DEFAULT_INITIAL_RATING);
         } else {
@@ -318,7 +390,9 @@ export async function POST(req: Request) {
         const goldEarned = goldEarnedFromRatingDelta(ratingDelta);
         const goldTotal = goldBefore + goldEarned;
 
-        const newLifetimeTotal = clampRating(lifetimeTotal + ratingDelta);
+        const newLifetimeTotal = clampLifetimeTotalRate(
+          lifetimeTotal + ratingDelta
+        );
 
         const lifetimeTierPromoted = isLifetimeTierOrRankPromoted(
           lifetimeTotal,
@@ -365,6 +439,7 @@ export async function POST(req: Request) {
               ? {
                   winBaseBonus: winBaseBonus ?? 5,
                   winSpeedBonus: winSpeedBonus ?? 0,
+                  ghostBeatBonus: ghostBeatBonus ?? 0,
                 }
               : {}),
             createdAt: serverTimestamp(),
@@ -389,7 +464,7 @@ export async function POST(req: Request) {
           (shouldIncrementCharacterStats ? statHandCountForCharacter : 0);
         const newTotalWins =
           totalWins + (shouldIncrementCharacterStats ? 1 : 0);
-        const characterAverageHands = bayesianMeanHands(
+        const characterAverageHands = pureMeanHandCount(
           newTotalHandCount,
           newTotalWins
         );

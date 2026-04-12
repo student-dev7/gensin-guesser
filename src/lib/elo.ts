@@ -13,9 +13,18 @@ export function handScoreFromAvg(myHandCount: number, mAvgHandCount: number) {
 
 /** プレイヤーレートの下限（週次リセット後の基準は DEFAULT_INITIAL_RATING） */
 export const MIN_RATING = 1000;
+/** シーズン／週次の current_rate・rating の上限 */
+export const MAX_RATING = 5000;
+/** Firestore の累計レート lifetime_total_rate の上限 */
+export const MAX_LIFETIME_TOTAL_RATE = 9999;
 
 export function clampRating(rating: number) {
-  return Math.max(MIN_RATING, Math.min(5000, rating));
+  return Math.max(MIN_RATING, Math.min(MAX_RATING, rating));
+}
+
+/** 累計レート（ランク表示・昇格の基準）のみ 9999 まで許可 */
+export function clampLifetimeTotalRate(rating: number) {
+  return Math.max(MIN_RATING, Math.min(MAX_LIFETIME_TOTAL_RATE, rating));
 }
 
 /** 新規ユーザー・仮想対戦相手のベースレート・週次リセット時の基準 */
@@ -55,19 +64,32 @@ export function computeNewPlayerRating(
 const WIN_BASE_BONUS = 5;
 const WIN_SPEED_MULTIPLIER = 2;
 
+export type ApplyWinRatingBonusOptions = {
+  /**
+   * 擬似対戦のゴーストの正解手数。指定時は (ゴースト手数 − 自分の手数)×係数 を追加（負け越しは呼び出し側で負け処理に回すこと）。
+   */
+  ghostHandCount?: number;
+};
+
 export function applyWinRatingBonus(
   currentRating: number,
   averageHandCount: number,
-  myHandCount: number
+  myHandCount: number,
+  options?: ApplyWinRatingBonusOptions
 ) {
   const speedBonus =
     Math.max(0, averageHandCount - myHandCount) * WIN_SPEED_MULTIPLIER;
-  const ratingDelta = WIN_BASE_BONUS + speedBonus;
+  const ghostBeatBonus =
+    options?.ghostHandCount !== undefined
+      ? Math.max(0, options.ghostHandCount - myHandCount) * WIN_SPEED_MULTIPLIER
+      : 0;
+  const ratingDelta = WIN_BASE_BONUS + speedBonus + ghostBeatBonus;
   const newRating = clampRating(currentRating + ratingDelta);
   return {
     newRating,
     ratingDelta,
     baseBonus: WIN_BASE_BONUS,
     speedBonus,
+    ghostBeatBonus,
   };
 }

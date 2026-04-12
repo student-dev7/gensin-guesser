@@ -49,13 +49,19 @@ function matchClass(ok: boolean) {
     : "border-[#ece5d8]/20 bg-[#12182a]/95 text-[#ece5d8]/95";
 }
 
+type GhostInfo = {
+  ghostRunId: string;
+  displayName: string;
+  handCount: number;
+};
+
 type RatingStats = {
   before: number;
   after: number;
   delta: number;
   alreadySubmitted: boolean;
   weeklyResetApplied?: boolean;
-  /** 正解キャラの全プレイヤー記録に基づくベイズ平均手数（勝敗・サーバー算出） */
+  /** 正解キャラの全プレイヤー記録に基づく平均手数（単純平均・サーバー算出） */
   characterAverageHands?: number;
   /** このラウンドで獲得したゴールド（レート増分×10、重複送信時は 0） */
   goldEarned?: number;
@@ -102,6 +108,9 @@ export default function Home() {
   /** localhost のみ（DBG と同条件） */
   const [debugHost, setDebugHost] = useState(false);
   const [debugRevealAnswer, setDebugRevealAnswer] = useState(false);
+  const [ghost, setGhost] = useState<GhostInfo | null>(null);
+  const [ghostEcho, setGhostEcho] = useState<string | null>(null);
+  const ghostToastShownRef = useRef(false);
 
   const syncUserProfile = useCallback(async () => {
     try {
@@ -182,6 +191,48 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    setGhost(null);
+    ghostToastShownRef.current = false;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/get-ghost?characterName=${encodeURIComponent(target.name)}`
+        );
+        const json = (await res.json()) as {
+          ok?: boolean;
+          ghost?: GhostInfo | null;
+        };
+        if (cancelled) return;
+        if (json?.ok && json.ghost) {
+          setGhost(json.ghost);
+        } else {
+          setGhost(null);
+        }
+      } catch {
+        if (!cancelled) setGhost(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [target.name, roundId]);
+
+  useEffect(() => {
+    if (!ghost) return;
+    if (guesses.length !== ghost.handCount) return;
+    if (ghostToastShownRef.current) return;
+    ghostToastShownRef.current = true;
+    setGhostEcho(`${ghost.displayName}さんが正解しました！`);
+  }, [ghost, guesses.length]);
+
+  useEffect(() => {
+    if (!ghostEcho) return;
+    const t = window.setTimeout(() => setGhostEcho(null), 4500);
+    return () => window.clearTimeout(t);
+  }, [ghostEcho]);
+
+  useEffect(() => {
     try {
       localStorage.setItem(PLAYER_NAME_KEY, playerName);
     } catch {
@@ -212,8 +263,15 @@ export default function Home() {
   }, [goldHintOpen]);
 
   const won = guesses.some((g) => g.name === target.name);
+  const lostToGhost =
+    ghost !== null &&
+    !won &&
+    guesses.length > ghost.handCount;
   const finished =
-    surrendered || won || guesses.length >= MAX_GUESSES;
+    surrendered ||
+    won ||
+    guesses.length >= MAX_GUESSES ||
+    lostToGhost;
 
   const suggestions = useMemo(() => {
     const qRaw = query.trim();
@@ -302,6 +360,9 @@ export default function Home() {
             guessCount,
             won,
             displayName: nameCheck.name,
+            surrendered,
+            ...(ghost ? { ghostRunId: ghost.ghostRunId } : {}),
+            ...(lostToGhost ? { lostToGhost: true } : {}),
           }),
         });
 
@@ -382,6 +443,8 @@ export default function Home() {
     roundId,
     target.name,
     submitRetryKey,
+    ghost,
+    lostToGhost,
   ]);
 
   const goNextRound = useCallback(() => {
@@ -398,6 +461,8 @@ export default function Home() {
     setSubmitError(null);
     setSubmitLoading(false);
     setDebugRevealAnswer(false);
+    setGhostEcho(null);
+    ghostToastShownRef.current = false;
   }, [list]);
 
   const saveNameFromModal = useCallback(() => {
@@ -416,6 +481,14 @@ export default function Home() {
 
   return (
     <div className="flex min-h-screen flex-1 flex-col bg-[#0a0f1e] text-white">
+      {ghostEcho && (
+        <div
+          className="fixed left-1/2 top-[4.25rem] z-[95] max-w-[min(22rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-emerald-500/40 bg-emerald-950/90 px-4 py-2.5 text-center text-sm font-medium text-emerald-100 shadow-lg shadow-black/40"
+          role="status"
+        >
+          {ghostEcho}
+        </div>
+      )}
       <header className="relative z-10 w-full shrink-0 border-b border-[#ece5d8]/10 bg-[#0a0f1e]/92 px-3 py-2 backdrop-blur-sm sm:px-6">
         <nav
           className="mx-auto flex w-full max-w-4xl flex-wrap items-center gap-x-2 gap-y-2 sm:gap-x-3"
@@ -537,6 +610,121 @@ export default function Home() {
                 </span>
               </li>
             </ul>
+
+            <details className="mt-4 rounded-xl border border-amber-500/30 bg-[#0d1324]/85 px-3 py-2.5 text-left sm:px-4 sm:py-3">
+              <summary className="cursor-pointer list-none text-center text-sm font-semibold text-amber-200/95 [&::-webkit-details-marker]:hidden">
+                <span className="underline decoration-amber-500/40 underline-offset-2">
+                  パッチノート
+                </span>
+              </summary>
+              <div className="mt-3 space-y-2.5 border-t border-[#ece5d8]/10 pt-3 text-sm leading-relaxed text-white/72">
+                <p>
+                  対戦の基準を、
+                  <span className="font-semibold text-[#ece5d8]">
+                    過去のクリア記録から選ばれるゴースト
+                  </span>
+                  との比較に切り替えました（従来の「平均手数ボーナス」に加え、ゴーストとの差もレートに反映されます）。
+                  キャラ別の参考平均手数はベイズではなく
+                  <span className="font-medium text-[#ece5d8]">全プレイの単純平均</span>
+                  です（勝ち・負け・ゴースト敗北を含み、
+                  <span className="font-medium text-[#ece5d8]">降参は 7 手</span>
+                  として計上）。
+                </p>
+                <ul className="list-disc space-y-1.5 pl-4 marker:text-amber-400/80">
+                  <li>
+                    各ラウンド開始時に、そのお題キャラで過去に正解したプレイから1件がゴーストとして選ばれます（表示名・手数）。
+                  </li>
+                  <li>
+                    ゴーストが正解したのと同じ手数に達したタイミングで、ゴースト側の正解が通知されます。
+                  </li>
+                  <li>
+                    まだ自分が正解していない状態で、ゴーストの正解手数を
+                    <span className="font-medium text-[#ece5d8]">超えた</span>
+                    時点で
+                    <span className="font-medium text-rose-300/90">敗北</span>
+                    です。同じ手数の時点ではまだ続行できます。
+                  </li>
+                  <li>
+                    正解すればクリアでレートは勝ち更新です。未正解のままゴーストの手数を超えたときだけ敗北し、それまでは予想を続けられます。ゴーストより少ない手数で当てるほどレートボーナスが増えます。
+                  </li>
+                  <li>
+                    累計レート（
+                    <span className="font-medium text-[#ece5d8]">lifetime_total_rate</span>
+                    ）の上限を
+                    <span className="tabular-nums font-medium text-amber-200/95">9999</span>
+                    に引き上げました（週次レートの上限は従来どおりです）。
+                  </li>
+                </ul>
+
+                <div className="mt-4 rounded-lg border border-[#ece5d8]/15 bg-[#0a0f1e]/80 px-3 py-2.5 text-[0.8125rem] leading-relaxed sm:text-sm">
+                  <p className="font-semibold text-[#ece5d8]">
+                    レート変動の目安（キャラ平均手数がちょうど 4 手のとき）
+                  </p>
+                  <p className="mt-1.5 text-white/65">
+                    週次レートの「勝ち」は{" "}
+                    <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
+                      +5 + max(0, 平均−自分の手数)×2
+                    </span>
+                    （＋ゴーストがいる場合はさらに{" "}
+                    <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
+                      max(0, ゴースト手数−自分の手数)×2
+                    </span>
+                    ）。平均が 4 のときの増分だけ抜き出すと次のとおりです。
+                  </p>
+                  <div className="mt-2 overflow-x-auto">
+                    <table className="w-full min-w-[16rem] border-collapse text-left text-[0.8125rem] tabular-nums sm:text-sm">
+                      <thead>
+                        <tr className="border-b border-[#ece5d8]/20 text-[#ece5d8]/90">
+                          <th className="py-1 pr-3 font-medium">正解までの手数</th>
+                          <th className="py-1 font-medium">週次レート増分（勝ち）</th>
+                        </tr>
+                      </thead>
+                      <tbody className="text-white/80">
+                        <tr className="border-b border-white/5">
+                          <td className="py-1 pr-3">1</td>
+                          <td className="text-emerald-200/95">+11</td>
+                        </tr>
+                        <tr className="border-b border-white/5">
+                          <td className="py-1 pr-3">2</td>
+                          <td className="text-emerald-200/95">+9</td>
+                        </tr>
+                        <tr className="border-b border-white/5">
+                          <td className="py-1 pr-3">3</td>
+                          <td className="text-emerald-200/95">+7</td>
+                        </tr>
+                        <tr className="border-b border-white/5">
+                          <td className="py-1 pr-3">4</td>
+                          <td className="text-emerald-200/95">+5</td>
+                        </tr>
+                        <tr className="border-b border-white/5">
+                          <td className="py-1 pr-3">5〜7</td>
+                          <td className="text-emerald-200/95">+5（平均より遅いので速度ボーナスなし）</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="mt-3 text-white/65">
+                    <span className="font-semibold text-rose-300/90">負け</span>
+                    （不正解・降参・手数切れ・ゴースト敗北など）の週次レート減少は、
+                    <span className="font-medium text-[#ece5d8]">
+                      そのラウンドで何手使ったかではなく
+                    </span>
+                    、いまのシーズンレートと期待勝率{" "}
+                    <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">E</span>{" "}
+                    だけで決まります（手数 1〜7 で式は同じ）。相手レート 1500・自分の週次レートが 1500 のときは{" "}
+                    <span className="tabular-nums text-rose-200/95">約 −16</span>
+                    、2000 のときは{" "}
+                    <span className="tabular-nums text-rose-200/95">約 −30</span>
+                    （いずれも{" "}
+                    <span className="font-mono text-[0.65rem] text-white/70 sm:text-xs">
+                      K=32
+                    </span>
+                    ・上限クリップ前）。
+                  </p>
+                </div>
+              </div>
+            </details>
+
             <p className="mt-3 text-center text-[0.8125rem] font-medium leading-snug text-amber-300/95 sm:text-sm">
               ※クイズは既に始まっています。最初の1手を入力してください！
             </p>
@@ -775,7 +963,7 @@ export default function Home() {
               id="result-title"
               className="text-center text-lg font-semibold text-[#ece5d8]"
             >
-              {won ? "正解" : "不正解"}
+              {won ? "正解" : lostToGhost ? "ゴーストに敗北" : "不正解"}
             </h2>
             <p className="mt-1 text-center text-sm text-white/50">答え</p>
             <p className="mt-2 text-center text-3xl font-bold tracking-tight text-white">
@@ -804,7 +992,7 @@ export default function Home() {
             {ratingStats != null &&
               typeof ratingStats.characterAverageHands === "number" && (
                 <p className="mt-3 text-center text-sm leading-relaxed text-sky-200/90">
-                  このキャラの平均手数（全プレイヤー・勝敗含む・ベイズ推定）:{" "}
+                  このキャラの平均手数（全プレイヤー・勝敗含む・単純平均）:{" "}
                   <span className="font-semibold tabular-nums text-white">
                     {ratingStats.characterAverageHands.toFixed(2)}
                   </span>{" "}
@@ -920,7 +1108,13 @@ export default function Home() {
               </p>
             )}
 
-            {!won && !surrendered && (
+            {!won && lostToGhost && (
+              <p className="mt-4 text-center text-sm leading-relaxed text-rose-300/90">
+                ゴーストの正解手数を超えたため敗北です。
+              </p>
+            )}
+
+            {!won && !surrendered && !lostToGhost && (
               <p className="mt-4 text-center text-sm text-white/60">
                 手数切れです。
               </p>

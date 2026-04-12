@@ -8,7 +8,11 @@ import {
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
-import { clampRating, DEFAULT_INITIAL_RATING } from "@/lib/elo";
+import {
+  clampLifetimeTotalRate,
+  clampRating,
+  DEFAULT_INITIAL_RATING,
+} from "@/lib/elo";
 import { DEBUG_USER_UPDATED_EVENT } from "@/lib/debugUserEvents";
 import {
   ensureAnonymousSession,
@@ -106,7 +110,7 @@ export function DebugUserTools() {
         return;
       }
       const cr = clampRating(season);
-      const lt = clampRating(lifetime);
+      const lt = clampLifetimeTotalRate(lifetime);
       const db = getFirestore(auth.app);
       await setDoc(
         doc(db, "users", uid),

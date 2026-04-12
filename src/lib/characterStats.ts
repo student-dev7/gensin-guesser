@@ -4,23 +4,25 @@ export function characterStatsDocId(characterName: string): string {
 }
 
 /**
- * データが無いときの参照用（フォールバック表示など）。
- * レート計算の平均は bayesianMeanHands を使用（事前分布 5.0×10 相当）。
+ * データが無いときの参照用（フォールバック表示・レート計算の平均が未初期のとき）。
  */
 export const DEFAULT_AVG_HANDS = 5;
 
 /**
- * ベイズ風の平均手数: (totalHandCount + 50) / (totalSampleRounds + 10)
- * totalHandCount: 集計に含めた各プレイの手数の合計（勝ち・負けの両方）
- * totalSampleRounds: 上記プレイの回数（Firestore では totalWins フィールド名のまま）
- * データなし (0,0) では (0+50)/(0+10) = 5.0（事前 5 手 × 10 回分）。
+ * キャラ別の平均手数（単純平均）。
+ * - totalHandCount: 集計した各プレイの手数の合計（勝ち・負け・降参・ゴースト敗北などすべて）
+ * - totalPlays: Firestore では従来どおり `totalWins` フィールド名で保持（「試行回数」）
  */
-export function bayesianMeanHands(
+export function pureMeanHandCount(
   totalHandCount: number,
-  totalSampleRounds: number
+  totalPlays: number
 ): number {
-  return (totalHandCount + 50) / (totalSampleRounds + 10);
+  if (
+    totalPlays <= 0 ||
+    !Number.isFinite(totalHandCount) ||
+    !Number.isFinite(totalPlays)
+  ) {
+    return DEFAULT_AVG_HANDS;
+  }
+  return totalHandCount / totalPlays;
 }
-
-/** 統計に加算する「正解」はこの手数以上。負けは常に対象（実際の予想回数で加算） */
-export const MIN_HANDS_FOR_STATS = 2;
