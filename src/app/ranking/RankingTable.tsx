@@ -42,9 +42,19 @@ export function RankingTable({ rows, error }: Props) {
   const [massDown500Message, setMassDown500Message] = useState<string | null>(
     null
   );
+  const [adminEditOpen, setAdminEditOpen] = useState(false);
+  const [adminEditUid, setAdminEditUid] = useState<string | null>(null);
+  const [adminEditName, setAdminEditName] = useState("");
+  const [adminEditRatingDraft, setAdminEditRatingDraft] = useState("");
+  const [adminEditPass, setAdminEditPass] = useState("");
+  const [adminEditLoading, setAdminEditLoading] = useState(false);
+  const [adminEditMessage, setAdminEditMessage] = useState<string | null>(
+    null
+  );
 
   const isAdmin =
     typeof myUid === "string" && myUid.length > 0 && isAdminUid(myUid);
+  const tableColSpan = isAdmin ? 5 : 4;
 
   useEffect(() => {
     let cancelled = false;
@@ -434,6 +444,133 @@ export function RankingTable({ rows, error }: Props) {
           </div>
         )}
 
+        {adminEditOpen && adminEditUid && (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-edit-rate-title"
+            onClick={() => setAdminEditOpen(false)}
+          >
+            <div
+              className="w-full max-w-md rounded-2xl border border-amber-500/35 bg-[#12182a] p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2
+                id="admin-edit-rate-title"
+                className="text-lg font-semibold text-amber-200/95"
+              >
+                レートを上書き（管理者）
+              </h2>
+              <p className="mt-2 text-sm text-white/70">
+                <span className="font-medium text-[#ece5d8]">{adminEditName}</span>
+              </p>
+              <p className="mt-1 font-mono text-xs text-white/45">{adminEditUid}</p>
+              <label className="mt-4 block text-xs font-medium text-[#ece5d8]/80">
+                新しいシーズンレート（1500〜5000 に丸められます）
+              </label>
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1500}
+                max={5000}
+                value={adminEditRatingDraft}
+                onChange={(e) => setAdminEditRatingDraft(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-[#ece5d8]/20 bg-[#0a0f1e] px-4 py-3 text-sm text-white outline-none tabular-nums focus:border-amber-400/45"
+              />
+              <p className="mt-2 text-xs text-amber-200/75">
+                確認のため下に{" "}
+                <span className="font-mono text-amber-200/95">setrate</span>{" "}
+                と入力してください。
+              </p>
+              <input
+                value={adminEditPass}
+                onChange={(e) => setAdminEditPass(e.target.value)}
+                autoComplete="off"
+                placeholder="setrate"
+                className="mt-2 w-full rounded-xl border border-[#ece5d8]/20 bg-[#0a0f1e] px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-amber-400/45"
+              />
+              {adminEditMessage && (
+                <p className="mt-2 text-sm text-rose-400">{adminEditMessage}</p>
+              )}
+              <p className="mt-3 text-xs leading-relaxed text-white/40">
+                本番ではサーバーに{" "}
+                <span className="text-white/55">FIREBASE_SERVICE_ACCOUNT_JSON</span>{" "}
+                が必要です（一括レートと同じ）。
+              </p>
+              <div className="mt-6 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setAdminEditOpen(false)}
+                  className="rounded-xl px-4 py-2 text-sm text-white/70 transition hover:bg-white/10"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  disabled={adminEditLoading}
+                  onClick={async () => {
+                    setAdminEditMessage(null);
+                    if (adminEditPass.trim().toLowerCase() !== "setrate") {
+                      setAdminEditMessage("「setrate」と正確に入力してください");
+                      return;
+                    }
+                    const n = Number(adminEditRatingDraft);
+                    if (!Number.isFinite(n)) {
+                      setAdminEditMessage("レートは数値で入力してください");
+                      return;
+                    }
+                    setAdminEditLoading(true);
+                    try {
+                      await ensureAnonymousSession();
+                      const auth = getFirebaseAuth();
+                      const idToken = await auth.currentUser?.getIdToken();
+                      if (!idToken || !adminEditUid) {
+                        setAdminEditMessage("ログインが必要です");
+                        return;
+                      }
+                      const res = await fetch(
+                        "/api/admin/set-user-season-rating",
+                        {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            idToken,
+                            targetUid: adminEditUid,
+                            rating: n,
+                            pass: adminEditPass.trim(),
+                          }),
+                        }
+                      );
+                      const json = (await res.json()) as {
+                        ok?: boolean;
+                        error?: string;
+                        rating?: number;
+                      };
+                      if (!json?.ok) {
+                        setAdminEditMessage(json?.error ?? "更新に失敗しました");
+                        return;
+                      }
+                      setAdminEditOpen(false);
+                      setAdminEditPass("");
+                      router.refresh();
+                    } catch (e: unknown) {
+                      setAdminEditMessage(
+                        e instanceof Error ? e.message : String(e)
+                      );
+                    } finally {
+                      setAdminEditLoading(false);
+                    }
+                  }}
+                  className="rounded-xl border border-amber-500/50 bg-amber-900/50 px-4 py-2 text-sm font-medium text-amber-100 transition hover:bg-amber-900/70 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {adminEditLoading ? "保存中…" : "保存"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="overflow-hidden rounded-2xl border border-[#ece5d8]/20 bg-[#0d1324]/95 shadow-[0_25px_60px_-20px_rgba(0,0,0,0.65)] backdrop-blur-sm">
           <div className="border-b border-[#ece5d8]/15 bg-gradient-to-r from-[#0f1528] via-[#121a30] to-[#0f1528] px-5 py-4">
             <div className="flex items-center justify-between gap-3">
@@ -456,13 +593,18 @@ export function RankingTable({ rows, error }: Props) {
                   <th className="px-4 py-3 text-right font-semibold sm:px-6">
                     プレイ回数
                   </th>
+                  {isAdmin && (
+                    <th className="px-4 py-3 text-right font-semibold sm:px-6">
+                      管理
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#ece5d8]/10">
                 {error && (
                   <tr>
                     <td
-                      colSpan={4}
+                      colSpan={tableColSpan}
                       className="px-5 py-10 text-center text-[#ece5d8]/90 sm:px-8"
                     >
                       {error}
@@ -473,7 +615,7 @@ export function RankingTable({ rows, error }: Props) {
                 {!error && rows.length === 0 && (
                   <tr>
                     <td
-                      colSpan={4}
+                      colSpan={tableColSpan}
                       className="px-5 py-12 text-center text-white/45 sm:px-8"
                     >
                       まだランキングがありません
@@ -539,6 +681,24 @@ export function RankingTable({ rows, error }: Props) {
                         <td className="whitespace-nowrap px-4 py-3.5 text-right tabular-nums text-white/45 sm:px-6">
                           {row.games}
                         </td>
+                        {isAdmin && (
+                          <td className="whitespace-nowrap px-4 py-3.5 text-right sm:px-6">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setAdminEditUid(row.uid);
+                                setAdminEditName(row.displayName);
+                                setAdminEditRatingDraft(String(Math.round(row.rating)));
+                                setAdminEditPass("");
+                                setAdminEditMessage(null);
+                                setAdminEditOpen(true);
+                              }}
+                              className="rounded-lg border border-amber-500/40 bg-amber-950/40 px-2.5 py-1 text-xs font-medium text-amber-200/95 transition hover:border-amber-400/60 hover:bg-amber-950/65"
+                            >
+                              編集
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
