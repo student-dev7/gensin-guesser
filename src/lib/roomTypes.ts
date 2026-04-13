@@ -4,6 +4,8 @@ export const ROOM_CODE_CHARS =
 
 export const ROOM_CODE_LEN = 5;
 export const ROOM_MOVE_TIMEOUT_SEC_DEFAULT = 30;
+/** 同時に存在できる公開ルーム（isPublic）の上限（Firestore 無料枠対策） */
+export const MAX_PUBLIC_ROOMS = 15;
 /** 公開一覧の「3/4」表示用・定員のデフォルト（作成時に保存） */
 export const ROOM_MAX_PLAYERS_DEFAULT = 4;
 /** Firestore / API との整合用（実質無制限モードの上限） */

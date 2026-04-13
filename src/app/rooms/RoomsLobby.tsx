@@ -2,21 +2,14 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   collection,
   doc,
-  getCountFromServer,
   getDoc,
+  getDocs,
   getFirestore,
   limit,
-  onSnapshot,
   query,
   serverTimestamp,
   setDoc,
@@ -24,6 +17,7 @@ import {
 } from "firebase/firestore";
 import {
   generateRoomCode,
+  MAX_PUBLIC_ROOMS,
   normalizeRoomCode,
   ROOM_MAX_PLAYERS_DEFAULT,
   ROOM_MOVE_TIMEOUT_SEC_DEFAULT,
@@ -47,6 +41,11 @@ function firestoreDb() {
   return getFirestore(getFirebaseAuth().app);
 }
 
+const IS_NEXT_DEV = process.env.NODE_ENV === "development";
+
+/** onSnapshot はルーム doc のたびの更新（ハートビート等）で読み取りが爆発するため使わない */
+const PUBLIC_ROOMS_POLL_MS = 10 * 60 * 1000;
+
 export function RoomsLobby() {
   const router = useRouter();
   const [createName, setCreateName] = useState("");
@@ -64,13 +63,16 @@ export function RoomsLobby() {
   const [joinError, setJoinError] = useState<string | null>(null);
 
   const [publicRooms, setPublicRooms] = useState<RoomDocument[]>([]);
-  const [presenceCountByCode, setPresenceCountByCode] = useState<
-    Record<string, number>
-  >({});
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [joinModalOpen, setJoinModalOpen] = useState(false);
   const [viewerUid, setViewerUid] = useState<string | null>(null);
   const [adminDeleteCode, setAdminDeleteCode] = useState<string | null>(null);
+  const [devForceDeleteCode, setDevForceDeleteCode] = useState("");
+  const [devForceDeleteBusy, setDevForceDeleteBusy] = useState(false);
+  const [devForceDeleteMsg, setDevForceDeleteMsg] = useState<string | null>(
+    null
+  );
+  const [publicRoomsLoading, setPublicRoomsLoading] = useState(false);
 
   useEffect(() => {
     void ensureAnonymousSession().catch(() => {});
@@ -114,73 +116,42 @@ export function RoomsLobby() {
     return () => window.removeEventListener("keydown", onKey);
   }, [createModalOpen, joinModalOpen]);
 
-  useEffect(() => {
+  const loadPublicRooms = useCallback(async () => {
     const db = firestoreDb();
     const q = query(
       collection(db, "rooms"),
       where("isPublic", "==", true),
-      limit(40)
+      limit(MAX_PUBLIC_ROOMS)
     );
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const rows: RoomDocument[] = [];
-        snap.forEach((d) => rows.push(d.data() as RoomDocument));
-        rows.sort((a, b) => {
-          const ta = (a.createdAt as { seconds?: number })?.seconds ?? 0;
-          const tb = (b.createdAt as { seconds?: number })?.seconds ?? 0;
-          return tb - ta;
-        });
-        setPublicRooms(rows);
-      },
-      (err) => {
-        console.warn("[public rooms] snapshot error", err);
-        setPublicRooms([]);
-      }
-    );
-    return () => unsub();
+    setPublicRoomsLoading(true);
+    try {
+      const snap = await getDocs(q);
+      const rows: RoomDocument[] = [];
+      snap.forEach((d) => rows.push(d.data() as RoomDocument));
+      rows.sort((a, b) => {
+        const ta = (a.createdAt as { seconds?: number })?.seconds ?? 0;
+        const tb = (b.createdAt as { seconds?: number })?.seconds ?? 0;
+        return tb - ta;
+      });
+      setPublicRooms(rows);
+    } catch (e) {
+      console.warn("[public rooms] getDocs error", e);
+      setPublicRooms([]);
+    } finally {
+      setPublicRoomsLoading(false);
+    }
   }, []);
 
-  const publicRoomCodesKey = useMemo(
-    () => publicRooms.map((r) => r.code).sort().join(","),
-    [publicRooms]
-  );
-
-  const publicRoomsRef = useRef(publicRooms);
-  publicRoomsRef.current = publicRooms;
-
   useEffect(() => {
-    if (publicRooms.length === 0) {
-      setPresenceCountByCode({});
-      return;
-    }
-    const db = firestoreDb();
-    let cancelled = false;
-    const load = async () => {
-      const rooms = publicRoomsRef.current;
-      if (rooms.length === 0) return;
-      try {
-        const entries = await Promise.all(
-          rooms.map(async (r) => {
-            const cq = query(collection(db, "rooms", r.code, "presence"));
-            const snap = await getCountFromServer(cq);
-            return [r.code, snap.data().count] as const;
-          })
-        );
-        if (!cancelled) {
-          setPresenceCountByCode(Object.fromEntries(entries));
-        }
-      } catch {
-        if (!cancelled) setPresenceCountByCode({});
+    void loadPublicRooms();
+    const id = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+        return;
       }
-    };
-    void load();
-    const id = window.setInterval(load, 12_000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [publicRoomCodesKey, publicRooms.length]);
+      void loadPublicRooms();
+    }, PUBLIC_ROOMS_POLL_MS);
+    return () => window.clearInterval(id);
+  }, [loadPublicRooms]);
 
   const normalizedJoin = useMemo(
     () => normalizeRoomCode(joinCode),
@@ -211,6 +182,20 @@ export function RoomsLobby() {
       // 匿名セッションをルール評価まで確実に反映させる
       await auth.currentUser.getIdToken();
       const db = firestoreDb();
+      if (createPublic) {
+        const slotQ = query(
+          collection(db, "rooms"),
+          where("isPublic", "==", true),
+          limit(MAX_PUBLIC_ROOMS + 1)
+        );
+        const slotSnap = await getDocs(slotQ);
+        if (slotSnap.size >= MAX_PUBLIC_ROOMS) {
+          setCreateError(
+            `公開ルームは同時に最大${MAX_PUBLIC_ROOMS}件までです。しばらく待つか、非公開で作成してください。`
+          );
+          return;
+        }
+      }
       let code = "";
       for (let attempt = 0; attempt < 12; attempt++) {
         code = generateRoomCode();
@@ -379,6 +364,33 @@ export function RoomsLobby() {
     },
     [router]
   );
+
+  const forceDeleteRoomDev = useCallback(async () => {
+    const code = normalizeRoomCode(devForceDeleteCode);
+    if (!code) {
+      setDevForceDeleteMsg("5桁の部屋番号を入力してください");
+      return;
+    }
+    setDevForceDeleteBusy(true);
+    setDevForceDeleteMsg(null);
+    try {
+      const res = await fetch("/api/dev/force-delete-room", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId: code }),
+      });
+      const j = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !j.ok) {
+        throw new Error(j.error || res.statusText);
+      }
+      setDevForceDeleteMsg(`削除しました（${code}）`);
+      setDevForceDeleteCode("");
+    } catch (e: unknown) {
+      setDevForceDeleteMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDevForceDeleteBusy(false);
+    }
+  }, [devForceDeleteCode]);
 
   const createForm = (
     <div className="space-y-3">
@@ -565,11 +577,22 @@ export function RoomsLobby() {
         </div>
 
         <section className="rounded-2xl border border-[#ece5d8]/15 bg-[#12182a]/90 p-5 shadow-lg">
-          <h2 className="text-lg font-semibold text-[#ece5d8]">
-            公開ルーム一覧
-          </h2>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <h2 className="text-lg font-semibold text-[#ece5d8]">
+              公開ルーム一覧
+            </h2>
+            <button
+              type="button"
+              disabled={publicRoomsLoading}
+              onClick={() => void loadPublicRooms()}
+              className="shrink-0 rounded-lg border border-[#ece5d8]/30 px-2.5 py-1 text-xs font-medium text-[#ece5d8] transition hover:border-[#ece5d8]/50 disabled:opacity-50"
+            >
+              {publicRoomsLoading ? "更新中…" : "一覧を更新"}
+            </button>
+          </div>
           <p className="mt-1 text-xs leading-relaxed text-white/45">
             自分がホストの公開ルームは、入室の横の「解散」でいつでも閉じられます（ゲーム画面と同じ）。
+            公開枠は同時{MAX_PUBLIC_ROOMS}件まで。一覧は約10分ごと（タブが表示中のとき）に自動取得します。
           </p>
           {publicRooms.length === 0 ? (
             <p className="mt-3 text-sm text-white/45">
@@ -584,7 +607,6 @@ export function RoomsLobby() {
                   r.maxPlayers <= 99
                     ? r.maxPlayers
                     : ROOM_MAX_PLAYERS_DEFAULT;
-                const n = presenceCountByCode[r.code];
                 return (
                   <li
                     key={r.code}
@@ -598,7 +620,7 @@ export function RoomsLobby() {
                           <span className="text-amber-200/80">🔒</span>
                         ) : null}
                         {" · "}
-                        {typeof n === "number" ? `${n}/${cap}` : "—/—"} 参加者
+                        定員 {cap} 名まで
                         {" · "}
                         {r.maxHandsLimited ? "7手" : "♾️"}
                       </p>
@@ -640,6 +662,47 @@ export function RoomsLobby() {
             </ul>
           )}
         </section>
+
+        {IS_NEXT_DEV ? (
+          <section className="rounded-2xl border border-dashed border-amber-500/40 bg-[#0a0f1e]/90 p-4 text-sm shadow-inner">
+            <p className="text-xs font-semibold text-amber-200/95">
+              開発環境のみ：ルーム強制削除
+            </p>
+            <p className="mt-1 text-[0.7rem] leading-relaxed text-white/45">
+              <code className="text-white/55">next dev</code>{" "}
+              かつ .env.local に{" "}
+              <code className="text-white/55">FIREBASE_SERVICE_ACCOUNT_JSON</code>{" "}
+              があるとき Firestore から該当ルームを消せます（ホスト不要）。
+            </p>
+            <div className="mt-3 flex flex-wrap items-end gap-2">
+              <label className="flex min-w-[9rem] flex-1 flex-col text-[0.65rem] text-white/55">
+                部屋番号（5桁）
+                <input
+                  value={devForceDeleteCode}
+                  onChange={(e) =>
+                    setDevForceDeleteCode(
+                      e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "")
+                    )
+                  }
+                  maxLength={5}
+                  className="mt-1 rounded-lg border border-white/15 bg-black/35 px-2 py-2 font-mono text-sm text-white outline-none focus:border-amber-400/40"
+                  placeholder="CF4GM"
+                />
+              </label>
+              <button
+                type="button"
+                disabled={devForceDeleteBusy}
+                onClick={() => void forceDeleteRoomDev()}
+                className="rounded-lg border border-rose-500/45 bg-rose-950/40 px-3 py-2 text-xs font-medium text-rose-100 transition hover:border-rose-400/55 disabled:opacity-50"
+              >
+                {devForceDeleteBusy ? "削除中…" : "強制削除"}
+              </button>
+            </div>
+            {devForceDeleteMsg ? (
+              <p className="mt-2 text-xs text-[#ece5d8]/80">{devForceDeleteMsg}</p>
+            ) : null}
+          </section>
+        ) : null}
       </div>
 
       {createModalOpen ? (

@@ -59,6 +59,12 @@ const MIN_GUESSES_TO_RESIGN = 4;
 const BATTLE_MODE_KEY = "genshin-guesser-battle-mode";
 const ACCENT = "text-[#ece5d8]";
 
+/** 「※クイズは既に始まっています…」直下の臨時お知らせ。不要になったら `false` にするか、定数＋QUIZ_LINE_NOTICE の JSX ごと削除。 */
+const SHOW_PLAY_GUIDE_MAINTENANCE_NOTICE = true;
+const PLAY_GUIDE_MAINTENANCE_NOTICE_TEXT =
+  "本日は勝ってもレートが増えません。\n" +
+  "リアルタイム対戦準備中に鯖落ちさせたことが原因で17時ごろ復活予定です。再発するようであればリアルタイム対戦は実装しません。よろしくお願いします。";
+
 function normalizeForSearch(s: string) {
   const t = s.trim().replace(/\s+/g, "");
   const noLongVowel = t.replace(/ー/g, "");
@@ -409,6 +415,8 @@ function Home() {
     }
   }, [roomCodeFromUrl, roomDoc, viewerUid, roomPresenceCount, list]);
 
+  const roomHostUid = roomDoc?.hostUid;
+
   useEffect(() => {
     if (
       !roomCodeFromUrl ||
@@ -416,6 +424,10 @@ function Home() {
       roomMissing ||
       !roomPwUnlocked
     ) {
+      return;
+    }
+    /** 全員が lastActivityAt を書くと人数×回数だけ書き込みが増えるため、ホストのみ更新 */
+    if (!viewerUid || !roomHostUid || viewerUid !== roomHostUid) {
       return;
     }
     const tick = () => {
@@ -433,9 +445,20 @@ function Home() {
       })();
     };
     tick();
-    const id = window.setInterval(tick, 90_000);
+    /**
+     * 掃除の「最終操作から N 分」より短い間隔で更新し、放置判定と被って誤削除されないようにする。
+     * （ROOM_LOBBY_NO_MATCH_MS 既定 5 分なら 2 分ハートビートで余裕あり）
+     */
+    const id = window.setInterval(tick, 120_000);
     return () => clearInterval(id);
-  }, [roomCodeFromUrl, roomDocPresent, roomMissing, roomPwUnlocked]);
+  }, [
+    roomCodeFromUrl,
+    roomDocPresent,
+    roomMissing,
+    roomPwUnlocked,
+    viewerUid,
+    roomHostUid,
+  ]);
 
   const handleRoomDissolve = useCallback(async () => {
     if (!roomCodeFromUrl || !roomDoc || viewerUid !== roomDoc.hostUid) return;
@@ -1393,6 +1416,15 @@ function Home() {
                 ? "ホストがゲームを開始するまでお待ちください。"
                 : "※クイズは既に始まっています。最初の1手を入力してください！"}
             </p>
+            {/* QUIZ_LINE_NOTICE: 臨時。消すときは SHOW_PLAY_GUIDE_MAINTENANCE_NOTICE 定数とこのブロックを削除 */}
+            {!roomInLobby && SHOW_PLAY_GUIDE_MAINTENANCE_NOTICE ? (
+              <p
+                className="mt-2 whitespace-pre-line text-center text-[0.68rem] leading-relaxed text-red-400"
+                role="status"
+              >
+                {PLAY_GUIDE_MAINTENANCE_NOTICE_TEXT}
+              </p>
+            ) : null}
           </div>
         </header>
 
