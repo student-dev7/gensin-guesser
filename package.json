@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "vercel:build": "vercel build --yes",
+    "vercel:deploy": "vercel deploy --prebuilt --prod",
+    "vercel:deploy:preview": "vercel deploy --prebuilt",
+    "deploy:vercel": "vercel build --yes && vercel deploy --prebuilt --prod"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
@@ -24,6 +28,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vercel": "^51.1.0"
   }
 }
