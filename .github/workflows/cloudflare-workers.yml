@@ -47,6 +47,9 @@ jobs:
           NEXT_PUBLIC_FIREBASE_APP_ID: ${{ secrets.NEXT_PUBLIC_FIREBASE_APP_ID }}
         run: npx opennextjs-cloudflare build
 
+      - name: Patch eval(require) for Workers runtime
+        run: node scripts/patch-opennext-eval.mjs
+
       - name: Deploy with Wrangler
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
