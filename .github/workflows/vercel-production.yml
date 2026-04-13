@@ -1,0 +1,45 @@
+# GitHub Actions から Vercel へ本番デプロイ（ビルドは GHA 上、Vercel には成果物のみアップロード）
+# 必要な Secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
+# 取得: Vercel → Account Settings → Tokens / ローカル .vercel/project.json の orgId・projectId
+# Vercel の「Git 連携」でも同じリポジトリが自動デプロイされる場合は二重になるので、
+# どちらか一方にする（例: このワークフローのみ使うなら Vercel 側の自動デプロイをオフ）
+name: Deploy to Vercel (Production)
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: vercel-production-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Pull Vercel env (production)
+        run: npx vercel@51 pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build (Vercel)
+        run: npx vercel@51 build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy prebuilt to Vercel (production)
+        run: npx vercel@51 deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
