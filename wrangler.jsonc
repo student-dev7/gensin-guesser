@@ -2,6 +2,8 @@
 	"$schema": "node_modules/wrangler/config-schema.json",
 	"main": ".open-next/worker.js",
 	"name": "genshin-guesser",
+	// 明示しないとダッシュボードで「No URLs enabled」になり workers.dev が付かないことがある
+	"workers_dev": true,
 	"compatibility_date": "2026-04-13",
 	"compatibility_flags": [
 		"nodejs_compat",
