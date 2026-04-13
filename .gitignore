@@ -55,4 +55,6 @@ serviceAccountKey*.json
 *.tsbuildinfo
 next-env.d.ts
 
-.vercel
+# OpenNext / Wrangler ローカル
+.open-next
+.wrangler
