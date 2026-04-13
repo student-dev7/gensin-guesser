@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vercel CLI の出力（ローカルに残ると eslint が拾う）
+    ".vercel/**",
   ]),
 ]);
 
