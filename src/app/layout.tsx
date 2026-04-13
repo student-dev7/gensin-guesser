@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { Analytics } from "@vercel/analytics/next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { AdminModeProvider } from "@/components/AdminModeProvider";
 import { DebugUserTools } from "@/components/DebugUserTools";
 import { FirebaseAnalyticsInit } from "@/components/FirebaseAnalyticsInit";
 import { LegalFooter } from "@/components/LegalFooter";
+import { VercelWebAnalytics } from "@/components/VercelWebAnalytics";
 import { SITE_URL } from "@/lib/site";
 import "./globals.css";
 
@@ -119,7 +119,7 @@ export default function RootLayout({
           <DebugUserTools />
         </AdminModeProvider>
         <FirebaseAnalyticsInit />
-        <Analytics />
+        <VercelWebAnalytics />
       </body>
     </html>
   );
