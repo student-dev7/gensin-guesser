@@ -51,6 +51,14 @@ export function RankingTable({ rows, error }: Props) {
   const [adminEditMessage, setAdminEditMessage] = useState<string | null>(
     null
   );
+  const [noticeOpen, setNoticeOpen] = useState(false);
+  const [noticeRateResetExpanded, setNoticeRateResetExpanded] = useState(false);
+  const [massReset1500Open, setMassReset1500Open] = useState(false);
+  const [massReset1500Pass, setMassReset1500Pass] = useState("");
+  const [massReset1500Loading, setMassReset1500Loading] = useState(false);
+  const [massReset1500Message, setMassReset1500Message] = useState<
+    string | null
+  >(null);
 
   const isAdmin =
     typeof myUid === "string" && myUid.length > 0 && isAdminUid(myUid);
@@ -89,13 +97,23 @@ export function RankingTable({ rows, error }: Props) {
             2 週間に 1 度、全員のシーズンレートが 1 ランク分（500pt）ダウンします。次回実行は4月27日です。自分だけ
             1500 に戻す場合は下のボタンを使えます。
           </p>
-          <div className="mt-8 flex flex-col items-center gap-4 sm:flex-row sm:flex-wrap sm:justify-center">
+          <div className="mt-8 flex flex-row flex-wrap items-center justify-center gap-x-2 gap-y-2.5 sm:gap-x-3 sm:gap-y-3">
             <Link
               href="/"
-              className="inline-flex items-center justify-center rounded-full border border-[#ece5d8]/35 bg-[#12182a] px-6 py-2.5 text-sm font-medium text-[#ece5d8] shadow-[0_0_24px_-8px_rgba(236,229,216,0.25)] transition hover:border-[#ece5d8]/55 hover:bg-[#1a2238]"
+              className="inline-flex shrink-0 items-center justify-center rounded-full border border-[#ece5d8]/35 bg-[#12182a] px-4 py-2 text-xs font-medium text-[#ece5d8] shadow-[0_0_24px_-8px_rgba(236,229,216,0.25)] transition hover:border-[#ece5d8]/55 hover:bg-[#1a2238] sm:px-6 sm:py-2.5 sm:text-sm"
             >
               ← トップへ戻る
             </Link>
+            <button
+              type="button"
+              onClick={() => {
+                setNoticeOpen(true);
+                setNoticeRateResetExpanded(false);
+              }}
+              className="inline-flex shrink-0 items-center justify-center rounded-full border border-sky-500/45 bg-sky-950/35 px-4 py-2 text-xs font-medium text-sky-100/95 shadow-sm transition hover:border-sky-400/60 hover:bg-sky-950/55 sm:px-6 sm:py-2.5 sm:text-sm"
+            >
+              お知らせ
+            </button>
             <button
               type="button"
               onClick={() => {
@@ -103,7 +121,7 @@ export function RankingTable({ rows, error }: Props) {
                 setResetConfirm("");
                 setResetMessage(null);
               }}
-              className="inline-flex items-center justify-center rounded-full border border-rose-500/45 bg-rose-950/35 px-6 py-2.5 text-sm font-medium text-rose-200/95 shadow-sm transition hover:border-rose-400/60 hover:bg-rose-950/55"
+              className="inline-flex max-w-full shrink-0 items-center justify-center rounded-full border border-rose-500/45 bg-rose-950/35 px-4 py-2 text-xs font-medium text-rose-200/95 shadow-sm transition hover:border-rose-400/60 hover:bg-rose-950/55 sm:px-6 sm:py-2.5 sm:text-sm"
             >
               自分のレートを 1500 に戻す
             </button>
@@ -116,7 +134,7 @@ export function RankingTable({ rows, error }: Props) {
                     setMassDown500Pass("");
                     setMassDown500Message(null);
                   }}
-                  className="inline-flex items-center justify-center rounded-full border border-amber-500/50 bg-amber-950/40 px-6 py-2.5 text-sm font-medium text-amber-200/95 shadow-sm transition hover:border-amber-400/65 hover:bg-amber-950/60"
+                  className="inline-flex shrink-0 items-center justify-center rounded-full border border-amber-500/50 bg-amber-950/40 px-4 py-2 text-xs font-medium text-amber-200/95 shadow-sm transition hover:border-amber-400/65 hover:bg-amber-950/60 sm:px-6 sm:py-2.5 sm:text-sm"
                 >
                   管理者：全員 −500pt
                 </button>
@@ -127,14 +145,208 @@ export function RankingTable({ rows, error }: Props) {
                     setMassDownPass("");
                     setMassDownMessage(null);
                   }}
-                  className="inline-flex items-center justify-center rounded-full border border-amber-500/50 bg-amber-950/40 px-6 py-2.5 text-sm font-medium text-amber-200/95 shadow-sm transition hover:border-amber-400/65 hover:bg-amber-950/60"
+                  className="inline-flex shrink-0 items-center justify-center rounded-full border border-amber-500/50 bg-amber-950/40 px-4 py-2 text-xs font-medium text-amber-200/95 shadow-sm transition hover:border-amber-400/65 hover:bg-amber-950/60 sm:px-6 sm:py-2.5 sm:text-sm"
                 >
                   管理者：全員 6 ティア分下げる
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMassReset1500Open(true);
+                    setMassReset1500Pass("");
+                    setMassReset1500Message(null);
+                  }}
+                  className="inline-flex shrink-0 items-center justify-center rounded-full border border-rose-500/55 bg-rose-950/45 px-4 py-2 text-xs font-medium text-rose-100/95 shadow-sm transition hover:border-rose-400/65 hover:bg-rose-950/65 sm:px-6 sm:py-2.5 sm:text-sm"
+                >
+                  管理者：全員を 1500 にリセット
                 </button>
               </>
             )}
           </div>
         </header>
+
+        {noticeOpen && (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="notice-dialog-title"
+            onClick={() => setNoticeOpen(false)}
+          >
+            <div
+              className="max-h-[min(90vh,36rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-sky-500/30 bg-[#12182a] p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2
+                id="notice-dialog-title"
+                className="text-center text-lg font-semibold text-[#ece5d8]"
+              >
+                お知らせ
+              </h2>
+              <div className="mt-4 rounded-xl border border-[#ece5d8]/15 bg-[#0a0f1e]/80">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setNoticeRateResetExpanded((v) => !v)
+                  }
+                  aria-expanded={noticeRateResetExpanded}
+                  className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-semibold text-sky-100/95 transition hover:bg-white/[0.04]"
+                >
+                  <span>レートリセットについて</span>
+                  <span className="tabular-nums text-white/50">
+                    {noticeRateResetExpanded ? "−" : "+"}
+                  </span>
+                </button>
+                {noticeRateResetExpanded && (
+                  <div className="space-y-4 border-t border-[#ece5d8]/10 px-4 pb-4 pt-3 text-sm leading-relaxed text-white/70">
+                    <p>
+                      今シーズンより「ゴースト機能」が追加され、以前よりもランクアップの難易度が大幅に上昇しました。これに伴い、プレイヤー間の公平性を保つため、今期は全ユーザーのレートを一律
+                      1500
+                      からリセットした状態でスタートします。
+                    </p>
+                    <p className="text-white/80">
+                      また、前シーズンの TOP3 のプレイヤーは
+                    </p>
+                    <ul className="list-none space-y-2 rounded-lg border border-amber-500/20 bg-amber-950/20 px-4 py-3 text-[#ece5d8]/95">
+                      <li className="tabular-nums">
+                        1 位：歌舞伎揚（3357）
+                      </li>
+                      <li className="tabular-nums">
+                        2 位：昭心（3312）
+                      </li>
+                      <li className="tabular-nums">
+                        3 位：俺が払うよ（2631）
+                      </li>
+                    </ul>
+                    <p className="text-white/80">でした！</p>
+                  </div>
+                )}
+              </div>
+              <div className="mt-6 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => setNoticeOpen(false)}
+                  className="rounded-xl border border-[#ece5d8]/35 bg-[#1a2238] px-6 py-2.5 text-sm font-medium text-[#ece5d8] transition hover:border-[#ece5d8]/55"
+                >
+                  閉じる
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {massReset1500Open && (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mass-reset-1500-title"
+            onClick={() => setMassReset1500Open(false)}
+          >
+            <div
+              className="w-full max-w-md rounded-2xl border border-rose-500/40 bg-[#12182a] p-6 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h2
+                id="mass-reset-1500-title"
+                className="text-lg font-semibold text-rose-200/95"
+              >
+                全ユーザーのレートを 1500 にする
+              </h2>
+              <p className="mt-2 text-sm leading-relaxed text-white/60">
+                全員の{" "}
+                <span className="text-[#ece5d8]/90">current_rate / rating</span>{" "}
+                を <span className="tabular-nums text-rose-200/95">1500</span>{" "}
+                に、プレイ回数{" "}
+                <span className="text-[#ece5d8]/90">games</span> を{" "}
+                <span className="tabular-nums text-rose-200/95">0</span>{" "}
+                に上書きします。取り消しはできません。
+              </p>
+              <p className="mt-2 text-xs text-rose-200/75">
+                実行するには下に{" "}
+                <span className="font-mono text-rose-200/95">reset1500</span>{" "}
+                と入力してください。
+              </p>
+              <input
+                value={massReset1500Pass}
+                onChange={(e) => setMassReset1500Pass(e.target.value)}
+                autoComplete="off"
+                placeholder="reset1500"
+                className="mt-4 w-full rounded-xl border border-[#ece5d8]/20 bg-[#0a0f1e] px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-rose-400/45"
+              />
+              {massReset1500Message && (
+                <p className="mt-2 text-sm text-rose-400">
+                  {massReset1500Message}
+                </p>
+              )}
+              <div className="mt-6 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMassReset1500Open(false)}
+                  className="rounded-xl px-4 py-2 text-sm text-white/70 transition hover:bg-white/10"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="button"
+                  disabled={massReset1500Loading}
+                  onClick={async () => {
+                    setMassReset1500Message(null);
+                    if (massReset1500Pass.trim().toLowerCase() !== "reset1500") {
+                      setMassReset1500Message(
+                        "「reset1500」と正確に入力してください"
+                      );
+                      return;
+                    }
+                    setMassReset1500Loading(true);
+                    try {
+                      await ensureAnonymousSession();
+                      const auth = getFirebaseAuth();
+                      const idToken = await auth.currentUser?.getIdToken();
+                      if (!idToken) {
+                        setMassReset1500Message("ログインが必要です");
+                        return;
+                      }
+                      const res = await fetch(
+                        "/api/admin/mass-reset-all-season-rating",
+                        {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            idToken,
+                            pass: massReset1500Pass.trim(),
+                          }),
+                        }
+                      );
+                      const json = (await res.json()) as {
+                        ok?: boolean;
+                        error?: string;
+                        userCount?: number;
+                      };
+                      if (!json?.ok) {
+                        setMassReset1500Message(
+                          json?.error ?? "処理に失敗しました"
+                        );
+                        return;
+                      }
+                      setMassReset1500Open(false);
+                      router.refresh();
+                    } catch (e: unknown) {
+                      setMassReset1500Message(
+                        e instanceof Error ? e.message : String(e)
+                      );
+                    } finally {
+                      setMassReset1500Loading(false);
+                    }
+                  }}
+                  className="rounded-xl border border-rose-500/50 bg-rose-900/50 px-4 py-2 text-sm font-medium text-rose-100 transition hover:bg-rose-900/70 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {massReset1500Loading ? "処理中…" : "実行する"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {resetOpen && (
           <div
