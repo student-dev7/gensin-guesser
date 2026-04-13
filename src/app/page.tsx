@@ -1,10 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import CHARACTERS from "../data/characters.json";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, getFirestore } from "firebase/firestore";
+import {
+  doc,
+  getDoc,
+  getFirestore,
+  onSnapshot,
+  serverTimestamp,
+  updateDoc,
+} from "firebase/firestore";
 import { ChatRoomPanel } from "../components/ChatRoomPanel";
 import { GoldCoinIcon } from "../components/GoldCoinIcon";
 import { MyRankStatus } from "../components/MyRankStatus";
@@ -17,6 +32,12 @@ import { DEBUG_USER_UPDATED_EVENT } from "../lib/debugUserEvents";
 import { useAdminMode } from "@/components/AdminModeProvider";
 import { isAdminUid } from "../lib/adminUids";
 import { validateDisplayName } from "../lib/validateDisplayName";
+import {
+  normalizeRoomCode,
+  ROOM_UNLIMITED_GUESS_CAP,
+  type RoomDocument,
+} from "@/lib/roomTypes";
+import { roomPasswordInputKey, sha256HexUtf8 } from "@/lib/roomHash";
 
 type Character = (typeof CHARACTERS)[number];
 
@@ -78,8 +99,14 @@ type RatingStats = {
   ratingDoubledApplied?: boolean;
 };
 
-export default function Home() {
+function Home() {
+  const searchParams = useSearchParams();
   const list = CHARACTERS as Character[];
+
+  const roomCodeFromUrl = useMemo(
+    () => normalizeRoomCode(searchParams.get("room")),
+    [searchParams]
+  );
 
   const [target, setTarget] = useState<Character>(() =>
     pickRandomTarget(list)
@@ -117,12 +144,80 @@ export default function Home() {
   const ghostToastShownRef = useRef(false);
   /** true = 対戦モード（ゴースト） / false = 個人モード */
   const [battleModeVs, setBattleModeVs] = useState(true);
-  const [patchNotesOpen, setPatchNotesOpen] = useState(false);
-  /** パッチノート第2層: どの題名を開いているか */
-  const [patchSection, setPatchSection] = useState<
-    "battle" | "stats" | "rate" | null
-  >(null);
   const [viewerUid, setViewerUid] = useState<string | null>(null);
+
+  const [roomDoc, setRoomDoc] = useState<RoomDocument | null>(null);
+  const [roomDocLoading, setRoomDocLoading] = useState(false);
+  const [roomMissing, setRoomMissing] = useState(false);
+  const [roomPwUnlocked, setRoomPwUnlocked] = useState(true);
+  const [roomPwDraft, setRoomPwDraft] = useState("");
+  const [roomPwError, setRoomPwError] = useState<string | null>(null);
+  const [roomPwBusy, setRoomPwBusy] = useState(false);
+  const [moveSecondsLeft, setMoveSecondsLeft] = useState<number | null>(null);
+
+  const maxGuessesThisRound = useMemo(() => {
+    if (!roomDoc) return MAX_GUESSES;
+    return roomDoc.maxHandsLimited ? 7 : ROOM_UNLIMITED_GUESS_CAP;
+  }, [roomDoc]);
+
+  const moveTimeoutSec = roomDoc?.moveTimeoutSec ?? 30;
+
+  useEffect(() => {
+    if (!roomCodeFromUrl) {
+      setRoomDoc(null);
+      setRoomMissing(false);
+      setRoomDocLoading(false);
+      setRoomPwUnlocked(true);
+      return;
+    }
+    setRoomDocLoading(true);
+    const db = getFirestore(getFirebaseAuth().app);
+    const unsub = onSnapshot(
+      doc(db, "rooms", roomCodeFromUrl),
+      (snap) => {
+        setRoomDocLoading(false);
+        if (!snap.exists()) {
+          setRoomMissing(true);
+          setRoomDoc(null);
+          return;
+        }
+        setRoomMissing(false);
+        setRoomDoc(snap.data() as RoomDocument);
+      },
+      () => {
+        setRoomDocLoading(false);
+        setRoomMissing(true);
+        setRoomDoc(null);
+      }
+    );
+    return () => unsub();
+  }, [roomCodeFromUrl]);
+
+  useEffect(() => {
+    if (!roomCodeFromUrl) {
+      setRoomPwUnlocked(true);
+      return;
+    }
+    try {
+      const ok =
+        sessionStorage.getItem(roomPasswordInputKey(roomCodeFromUrl)) === "1";
+      setRoomPwUnlocked(ok);
+    } catch {
+      setRoomPwUnlocked(false);
+    }
+  }, [roomCodeFromUrl]);
+
+  useEffect(() => {
+    if (!roomCodeFromUrl || !roomDoc) return;
+    if (!roomDoc.passwordHash) setRoomPwUnlocked(true);
+  }, [roomDoc, roomCodeFromUrl]);
+
+  const moveDeadlineRef = useRef(0);
+  const deadlineGuessLenRef = useRef(0);
+
+  const guessesRef = useRef(guesses);
+  guessesRef.current = guesses;
+  const finishedRef = useRef(false);
 
   const syncUserProfile = useCallback(async () => {
     try {
@@ -311,8 +406,77 @@ export default function Home() {
   const finished =
     surrendered ||
     won ||
-    guesses.length >= MAX_GUESSES ||
+    guesses.length >= maxGuessesThisRound ||
     lostToGhost;
+
+  const roomPlayable =
+    !roomCodeFromUrl ||
+    (!roomDocLoading &&
+      !roomMissing &&
+      roomDoc != null &&
+      roomPwUnlocked);
+
+  useEffect(() => {
+    finishedRef.current = finished;
+  }, [finished]);
+
+  useEffect(() => {
+    if (!roomCodeFromUrl || !roomDoc || !roomPwUnlocked || roomMissing || finished) {
+      setMoveSecondsLeft(null);
+      return;
+    }
+    moveDeadlineRef.current = Date.now() + moveTimeoutSec * 1000;
+    deadlineGuessLenRef.current = guesses.length;
+  }, [
+    guesses.length,
+    roundId,
+    roomCodeFromUrl,
+    roomDoc,
+    roomPwUnlocked,
+    roomMissing,
+    finished,
+    moveTimeoutSec,
+  ]);
+
+  useEffect(() => {
+    if (!roomCodeFromUrl || !roomDoc || !roomPwUnlocked || roomMissing || finished) {
+      return;
+    }
+    const tick = () => {
+      const ms = moveDeadlineRef.current - Date.now();
+      setMoveSecondsLeft(Math.max(0, Math.ceil(ms / 1000)));
+      if (
+        ms > 0 ||
+        finishedRef.current ||
+        guessesRef.current.length !== deadlineGuessLenRef.current
+      ) {
+        return;
+      }
+      const g = guessesRef.current;
+      const wrong = list.find(
+        (c) => c.name !== target.name && !g.some((x) => x.name === c.name)
+      );
+      if (!wrong) return;
+      deadlineGuessLenRef.current = -1;
+      setMessage("時間切れ（ミス1回・1手消費）");
+      setGuesses((prev) => [wrong, ...prev]);
+      setQuery("");
+    };
+    tick();
+    const id = window.setInterval(tick, 250);
+    return () => clearInterval(id);
+  }, [
+    roomCodeFromUrl,
+    roomDoc,
+    roomPwUnlocked,
+    roomMissing,
+    finished,
+    list,
+    target.name,
+    guesses.length,
+    roundId,
+    moveTimeoutSec,
+  ]);
 
   const suggestions = useMemo(() => {
     const qRaw = query.trim();
@@ -332,6 +496,10 @@ export default function Home() {
   const submitGuess = useCallback(
     (c: Character) => {
       if (finished) return;
+      if (!roomPlayable) {
+        setMessage("ルームの準備ができていません");
+        return;
+      }
       if (guesses.some((g) => g.name === c.name)) {
         setMessage("すでに試したキャラです");
         return;
@@ -340,7 +508,7 @@ export default function Home() {
       setGuesses((g) => [c, ...g]);
       setQuery("");
     },
-    [finished, guesses]
+    [finished, guesses, roomPlayable]
   );
 
   const canResign = guesses.length >= MIN_GUESSES_TO_RESIGN;
@@ -410,6 +578,9 @@ export default function Home() {
             ...(!battleModeVs ? { personalMode: true } : {}),
             ...(battleModeVs && ghost ? { ghostRunId: ghost.ghostRunId } : {}),
             ...(battleModeVs && lostToGhost ? { lostToGhost: true } : {}),
+            ...(roomCodeFromUrl && roomDoc
+              ? { maxGuessCap: maxGuessesThisRound }
+              : {}),
           }),
         });
 
@@ -493,6 +664,9 @@ export default function Home() {
     ghost,
     lostToGhost,
     battleModeVs,
+    roomCodeFromUrl,
+    roomDoc,
+    maxGuessesThisRound,
   ]);
 
   const goNextRound = useCallback(() => {
@@ -600,6 +774,123 @@ export default function Home() {
       </header>
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pb-16 pt-4 text-white sm:gap-7 sm:pt-5">
+        {roomCodeFromUrl && (
+          <div className="rounded-2xl border border-sky-500/30 bg-[#0d1324]/90 px-4 py-3 text-left text-sm shadow-lg shadow-black/30">
+            {roomDocLoading && (
+              <p className="text-sky-200/90">ルーム情報を読み込み中…</p>
+            )}
+            {roomMissing && !roomDocLoading && (
+              <p className="text-rose-300/90">
+                部屋番号「{roomCodeFromUrl}
+                」のルームが見つかりません。
+                <Link
+                  href="/rooms"
+                  className="ml-1 font-medium text-sky-300 underline-offset-2 hover:underline"
+                >
+                  ルーム一覧へ
+                </Link>
+              </p>
+            )}
+            {roomDoc && !roomMissing && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="font-medium text-[#ece5d8]">
+                    ルーム: {roomDoc.name}
+                  </p>
+                  <p className="font-mono text-xs tabular-nums text-white/60">
+                    {roomCodeFromUrl}
+                  </p>
+                </div>
+                <p className="text-xs text-white/55">
+                  手数:{" "}
+                  {roomDoc.maxHandsLimited ? (
+                    <span className="text-[#ece5d8]">7手まで</span>
+                  ) : (
+                    <span className="text-sky-200/95">無制限（♾️）</span>
+                  )}
+                  {" · "}
+                  1手 {moveTimeoutSec} 秒（時間切れはミス扱い）
+                </p>
+                {moveSecondsLeft != null &&
+                  roomPwUnlocked &&
+                  !finished &&
+                  !roomDocLoading && (
+                    <p
+                      className="text-base font-semibold tabular-nums text-amber-200/95"
+                      role="timer"
+                      aria-live="polite"
+                    >
+                      この手の残り {moveSecondsLeft} 秒
+                    </p>
+                  )}
+                {viewerUid &&
+                  roomDoc.hostUid === viewerUid &&
+                  !finished && (
+                    <div className="flex flex-wrap gap-2 border-t border-[#ece5d8]/10 pt-2">
+                      <span className="w-full text-[0.65rem] font-medium uppercase tracking-wide text-[#ece5d8]/55">
+                        ホスト: ルール
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void (async () => {
+                            try {
+                              await ensureAnonymousSession();
+                              const db = getFirestore(getFirebaseAuth().app);
+                              await updateDoc(
+                                doc(db, "rooms", roomCodeFromUrl),
+                                {
+                                  maxHandsLimited: true,
+                                  updatedAt: serverTimestamp(),
+                                }
+                              );
+                            } catch {
+                              /* ignore */
+                            }
+                          })();
+                        }}
+                        className={`rounded-full px-3 py-1 text-xs font-medium ${
+                          roomDoc.maxHandsLimited
+                            ? "border border-emerald-500/50 bg-emerald-950/50 text-emerald-100"
+                            : "border border-[#ece5d8]/20 text-white/65 hover:border-[#ece5d8]/40"
+                        }`}
+                      >
+                        7手まで
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void (async () => {
+                            try {
+                              await ensureAnonymousSession();
+                              const db = getFirestore(getFirebaseAuth().app);
+                              await updateDoc(
+                                doc(db, "rooms", roomCodeFromUrl),
+                                {
+                                  maxHandsLimited: false,
+                                  updatedAt: serverTimestamp(),
+                                }
+                              );
+                            } catch {
+                              /* ignore */
+                            }
+                          })();
+                        }}
+                        className={`rounded-full px-3 py-1 text-xs font-medium ${
+                          !roomDoc.maxHandsLimited
+                            ? "border border-sky-500/50 bg-sky-950/50 text-sky-100"
+                            : "border border-[#ece5d8]/20 text-white/65 hover:border-[#ece5d8]/40"
+                        }`}
+                      >
+                        無制限（♾️）
+                      </button>
+                    </div>
+                  )}
+              </div>
+            )}
+          </div>
+        )}
+
         <header className="text-center">
           <p
             className={`text-xs font-medium uppercase tracking-[0.28em] text-[#ece5d8]/60`}
@@ -622,7 +913,14 @@ export default function Home() {
                   ・
                 </span>
                 <span>
-                  全{MAX_GUESSES}手以内に正解を導き出せ！
+                  全
+                  {maxGuessesThisRound >= ROOM_UNLIMITED_GUESS_CAP
+                    ? "∞"
+                    : maxGuessesThisRound}
+                  手以内に正解を導き出せ！
+                  {roomCodeFromUrl && !roomDoc?.maxHandsLimited && (
+                    <span className="text-white/50">（ルーム無制限モード）</span>
+                  )}
                 </span>
               </li>
               <li className="flex gap-2">
@@ -662,203 +960,15 @@ export default function Home() {
             </ul>
 
             <div className="mt-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setPatchNotesOpen((o) => {
-                    const next = !o;
-                    if (!next) setPatchSection(null);
-                    return next;
-                  });
-                }}
-                className="w-full rounded-xl border border-amber-500/30 bg-[#0d1324]/85 px-3 py-2.5 text-center text-sm font-semibold text-amber-200/95 transition hover:border-amber-500/50 sm:px-4 sm:py-3"
-                aria-expanded={patchNotesOpen}
+              <Link
+                href="/rooms"
+                className="flex w-full items-center justify-center rounded-xl border border-sky-500/35 bg-[#0d1324]/85 px-3 py-2.5 text-center text-sm font-semibold text-sky-100/95 shadow-sm transition hover:border-sky-400/55 hover:bg-sky-950/25 sm:px-4 sm:py-3"
               >
-                パッチノート
-              </button>
-              {patchNotesOpen && (
-                <div className="mt-3 space-y-2 rounded-xl border border-amber-500/20 bg-[#0d1324]/85 px-2 py-2 text-sm sm:px-3">
-                  <div className="border-b border-[#ece5d8]/10 pb-2 last:border-b-0 last:pb-0">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setPatchSection((s) => (s === "battle" ? null : "battle"))
-                      }
-                      className="w-full rounded-lg px-2 py-2 text-left text-sm font-semibold text-amber-200/95 transition hover:bg-white/[0.06]"
-                      aria-expanded={patchSection === "battle"}
-                    >
-                      対戦方式の変更について
-                    </button>
-                    {patchSection === "battle" && (
-                      <div className="space-y-2.5 border-t border-[#ece5d8]/10 px-2 pb-2 pt-3 leading-relaxed text-white/72">
-                        <p>
-                          対戦の基準を、
-                          <span className="font-semibold text-[#ece5d8]">
-                            過去のクリア記録から選ばれるゴースト
-                          </span>
-                          との比較に切り替えました（従来の「平均手数ボーナス」に加え、ゴーストとの差もレートに反映されます）。
-                        </p>
-                        <ul className="list-disc space-y-1.5 pl-4 marker:text-amber-400/80">
-                          <li>
-                            各ラウンドで対戦モードのとき、そのお題キャラの過去正解から1件がゴーストとして選ばれます（表示名・手数）。1〜2
-                            手だけの正解記録はゴーストに使いません。
-                          </li>
-                          <li>
-                            ゴーストが正解したのと同じ手数に達したタイミングで、ゴースト側の正解が通知されます。
-                          </li>
-                          <li>
-                            まだ自分が正解していない状態で、ゴーストの正解手数を
-                            <span className="font-medium text-[#ece5d8]">超えた</span>
-                            時点で
-                            <span className="font-medium text-rose-300/90">敗北</span>
-                            です。同じ手数の時点ではまだ続行できます。
-                          </li>
-                          <li>
-                            正解すればクリアでシーズンレートは勝ち更新です。未正解のままゴーストの手数を超えたときだけ敗北し、それまでは予想を続けられます。ゴーストより少ない手数で当てるほどボーナスが増えます。
-                          </li>
-                          <li>
-                            <span className="font-medium text-[#ece5d8]">個人モード</span>
-                            ではゴーストは出ず、
-                            <span className="font-medium text-amber-200/90">
-                              シーズンレート・ゴールドは一切変動しません
-                            </span>
-                            （練習向け）。
-                          </li>
-                        </ul>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="border-b border-[#ece5d8]/10 pb-2 last:border-b-0 last:pb-0">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setPatchSection((s) => (s === "stats" ? null : "stats"))
-                      }
-                      className="w-full rounded-lg px-2 py-2 text-left text-sm font-semibold text-amber-200/95 transition hover:bg-white/[0.06]"
-                      aria-expanded={patchSection === "stats"}
-                    >
-                      キャラ統計・ランクについて
-                    </button>
-                    {patchSection === "stats" && (
-                      <div className="space-y-2.5 border-t border-[#ece5d8]/10 px-2 pb-2 pt-3 leading-relaxed text-white/72">
-                        <p>
-                          キャラ別の参考平均手数は
-                          <span className="font-medium text-[#ece5d8]">
-                            全プレイの単純平均
-                          </span>
-                          です（勝ち・負け・ゴースト敗北を含み、
-                          <span className="font-medium text-[#ece5d8]">降参は 7 手</span>
-                          として計上）。
-                        </p>
-                        <p>
-                          <span className="font-semibold text-[#ece5d8]">
-                            ランク表示
-                          </span>
-                          は
-                          <span className="font-medium text-[#ece5d8]">
-                            シーズンレート（対戦モード）
-                          </span>
-                          だけから決まります。ウォリアー〜ミシックは各ティア{" "}
-                          <span className="tabular-nums font-medium text-amber-200/95">
-                            125
-                          </span>{" "}
-                          pt 幅で IV→III→II→I と昇格します。詳細はヘッダーの「ランク」から参照できます。
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="pb-0">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setPatchSection((s) => (s === "rate" ? null : "rate"))
-                      }
-                      className="w-full rounded-lg px-2 py-2 text-left text-sm font-semibold text-amber-200/95 transition hover:bg-white/[0.06]"
-                      aria-expanded={patchSection === "rate"}
-                    >
-                      レート増減の目安
-                    </button>
-                    {patchSection === "rate" && (
-                      <div className="mt-2 border-t border-[#ece5d8]/10 px-2 pb-2 pt-3 text-[0.8125rem] leading-relaxed text-white/72 sm:text-sm">
-                        <p className="font-semibold text-[#ece5d8]">
-                          勝ちのシーズンレート増分
-                        </p>
-                        <p className="mt-1.5 text-white/65">
-                          シーズンレート帯ごとの
-                          <span className="font-medium text-[#ece5d8]">基礎点</span>
-                          （1500 未満 +15／1500〜1999 +12／2000 以上 +10）に、
-                          <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
-                            max(0, キャラ平均手数−自分の手数)×2
-                          </span>
-                          と、ゴーストがいるときは
-                          <span className="font-mono text-[0.7rem] text-white/80 sm:text-xs">
-                            max(0, ゴースト手数−自分の手数)×2
-                          </span>
-                          を加算します。
-                        </p>
-                        <p className="mt-2 font-semibold text-[#ece5d8]">
-                          例: キャラ平均 4 手・シーズンレート 1500〜1999（基礎 +12）
-                        </p>
-                        <div className="mt-2 overflow-x-auto">
-                          <table className="w-full min-w-[16rem] border-collapse text-left text-[0.8125rem] tabular-nums sm:text-sm">
-                            <thead>
-                              <tr className="border-b border-[#ece5d8]/20 text-[#ece5d8]/90">
-                                <th className="py-1 pr-3 font-medium">
-                                  正解までの手数
-                                </th>
-                                <th className="py-1 font-medium">
-                                  シーズンレート増分（勝ち）
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody className="text-white/80">
-                              <tr className="border-b border-white/5">
-                                <td className="py-1 pr-3">1</td>
-                                <td className="text-emerald-200/95">+18</td>
-                              </tr>
-                              <tr className="border-b border-white/5">
-                                <td className="py-1 pr-3">2</td>
-                                <td className="text-emerald-200/95">+16</td>
-                              </tr>
-                              <tr className="border-b border-white/5">
-                                <td className="py-1 pr-3">3</td>
-                                <td className="text-emerald-200/95">+14</td>
-                              </tr>
-                              <tr className="border-b border-white/5">
-                                <td className="py-1 pr-3">4</td>
-                                <td className="text-emerald-200/95">+12</td>
-                              </tr>
-                              <tr className="border-b border-white/5">
-                                <td className="py-1 pr-3">5〜7</td>
-                                <td className="text-emerald-200/95">
-                                  +12（平均より遅いので速度ボーナスなし）
-                                </td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
-                        <p className="mt-3 text-white/65">
-                          <span className="font-semibold text-rose-300/90">負け</span>
-                          （不正解・降参・手数切れ・ゴースト敗北など）のシーズンレート減少は、
-                          <span className="font-medium text-[#ece5d8]">
-                            そのラウンドの手数によらず
-                          </span>
-                          、いまのシーズンレート帯だけで決まります：
-                          1500 未満{" "}
-                          <span className="tabular-nums text-rose-200/95">−5</span>
-                          ／1500〜1999{" "}
-                          <span className="tabular-nums text-rose-200/95">−8</span>
-                          ／2000 以上{" "}
-                          <span className="tabular-nums text-rose-200/95">−12</span>
-                          。
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
+                リアルタイム対戦
+              </Link>
+              <p className="mt-2 text-center text-[0.7rem] leading-relaxed text-white/45">
+                野良や友達と盛り上がろう。
+              </p>
             </div>
 
             <p className="mt-3 text-center text-[0.8125rem] font-medium leading-snug text-amber-300/95 sm:text-sm">
@@ -880,7 +990,7 @@ export default function Home() {
                 <input
                   id="guess"
                   value={query}
-                  disabled={finished}
+                  disabled={finished || !roomPlayable}
                   onChange={(e) => setQuery(e.target.value)}
                   autoComplete="off"
                   placeholder="例: フリーナ"
@@ -1070,6 +1180,82 @@ export default function Home() {
           onClose={() => setChatOpen(false)}
         />
       )}
+
+      {roomCodeFromUrl &&
+        roomDoc &&
+        Boolean(roomDoc.passwordHash) &&
+        !roomPwUnlocked && (
+          <div
+            className="fixed inset-0 z-[130] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="room-pw-title"
+          >
+            <div className="w-full max-w-md rounded-2xl border border-sky-500/35 bg-[#12182a] p-6 shadow-2xl">
+              <h2
+                id="room-pw-title"
+                className="text-lg font-semibold text-[#ece5d8]"
+              >
+                ルームのパスワード
+              </h2>
+              <p className="mt-2 text-sm text-white/55">
+                「{roomDoc.name}」（{roomCodeFromUrl}）に入室するにはパスワードが必要です。
+              </p>
+              <input
+                type="password"
+                value={roomPwDraft}
+                onChange={(e) => setRoomPwDraft(e.target.value)}
+                autoComplete="current-password"
+                className="mt-4 w-full rounded-xl border border-[#ece5d8]/20 bg-[#0a0f1e] px-4 py-3 text-sm text-white outline-none placeholder:text-white/35 focus:border-sky-400/45"
+                placeholder="パスワード"
+              />
+              {roomPwError && (
+                <p className="mt-2 text-sm text-rose-400">{roomPwError}</p>
+              )}
+              <div className="mt-6 flex justify-end gap-2">
+                <Link
+                  href="/rooms"
+                  className="rounded-xl px-4 py-2 text-sm text-white/70 transition hover:bg-white/10"
+                >
+                  戻る
+                </Link>
+                <button
+                  type="button"
+                  disabled={roomPwBusy}
+                  onClick={() => {
+                    void (async () => {
+                      setRoomPwBusy(true);
+                      setRoomPwError(null);
+                      try {
+                        const h = await sha256HexUtf8(
+                          `${roomCodeFromUrl}|${roomPwDraft.trim()}`
+                        );
+                        if (h !== roomDoc.passwordHash) {
+                          setRoomPwError("パスワードが違います");
+                          return;
+                        }
+                        sessionStorage.setItem(
+                          roomPasswordInputKey(roomCodeFromUrl),
+                          "1"
+                        );
+                        setRoomPwUnlocked(true);
+                      } catch (e: unknown) {
+                        setRoomPwError(
+                          e instanceof Error ? e.message : String(e)
+                        );
+                      } finally {
+                        setRoomPwBusy(false);
+                      }
+                    })();
+                  }}
+                  className="rounded-xl border border-sky-500/45 bg-sky-950/50 px-4 py-2 text-sm font-medium text-sky-100 transition hover:border-sky-400/60 disabled:opacity-50"
+                >
+                  {roomPwBusy ? "確認中…" : "入室する"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
       {nameModalOpen && (
         <div
@@ -1305,6 +1491,20 @@ export default function Home() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function Page() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center bg-[#0a0f1e] text-[#ece5d8]">
+          読み込み中…
+        </div>
+      }
+    >
+      <Home />
+    </Suspense>
   );
 }
 

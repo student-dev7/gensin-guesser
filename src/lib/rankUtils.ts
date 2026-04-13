@@ -14,6 +14,19 @@ export const RANK_TIER_WIDTH_PT = 125;
 /** ウォリアー／エリートなどランク名が変わる帯の幅（各 500pt）。1 ランクダウンはおおよそこの幅。 */
 export const RANK_BAND_WIDTH_PT = 500;
 
+/** Gミシック（旧ミシックグローリー帯）の各ティア幅 */
+export const G_MYTHIC_TIER_WIDTH_PT = 1375;
+
+/** Gミシックのレート範囲（4500〜9999、IV〜I） */
+export const G_MYTHIC_MIN = 4500;
+export const G_MYTHIC_MAX = 9999;
+
+/** Iミシック到達レート（10000〜MAX） */
+export const I_MYTHIC_MIN = 10000;
+
+/** @deprecated 互換用。G_MYTHIC_MIN と同じ */
+export const MYTHIC_GLORY_MIN = G_MYTHIC_MIN;
+
 /** ランク・昇格までの pt 表示に使うレート（シーズンレート） */
 export function rateForRankDisplay(
   seasonRate: number | null | undefined
@@ -34,7 +47,8 @@ export type RankId =
   | "epic"
   | "legend"
   | "mythic"
-  | "mythic-glory";
+  | "mythic-glory"
+  | "mythic-i";
 
 export type RankData = {
   rankId: RankId;
@@ -59,7 +73,7 @@ export type TierProgress = {
 const ROMAN_BY_INDEX: RomanTier[] = ["IV", "III", "II", "I"];
 
 type RankBand = {
-  id: Exclude<RankId, "mythic-glory">;
+  id: Exclude<RankId, "mythic-glory" | "mythic-i">;
   /** 表示名（日本語読み） */
   nameJa: string;
   min: number;
@@ -68,8 +82,8 @@ type RankBand = {
 };
 
 /**
- * 8 段階ランク（ウォリアー〜ミシック）＋最上位ミシックグローリー。
- * 各ランク 500pt 幅、内部を IV〜I の 4 ティアに分割（125pt×4）。
+ * 8 段階ランク（ウォリアー〜ミシック）＋ Gミシック ＋ Iミシック。
+ * ウォリアー〜ミシック: 各ランク 500pt 幅、内部を IV〜I の 4 ティアに分割（125pt×4）。
  */
 export const RANK_BANDS: readonly RankBand[] = [
   { id: "warrior", nameJa: "ウォリアー", min: 1000, max: 1499, tierWidth: RANK_TIER_WIDTH_PT },
@@ -80,9 +94,6 @@ export const RANK_BANDS: readonly RankBand[] = [
   { id: "legend", nameJa: "レジェンド", min: 3500, max: 3999, tierWidth: RANK_TIER_WIDTH_PT },
   { id: "mythic", nameJa: "ミシック", min: 4000, max: 4499, tierWidth: RANK_TIER_WIDTH_PT },
 ] as const;
-
-/** ミシックグローリー下限（ローマ数字なし・最上位帯） */
-export const MYTHIC_GLORY_MIN = 4500;
 
 export function rankImagePath(rankId: RankId): string {
   return `/assets/ranks/${rankId}.png`;
@@ -112,9 +123,15 @@ export function getRankRangeTableRows(): {
   }));
   rows.push({
     rankId: "mythic-glory",
-    rankName: "ミシックグローリー",
-    rangeLabel: `${MYTHIC_GLORY_MIN} 〜 ${MAX_RATING}`,
-    tierWidthLabel: `${MAX_RATING - MYTHIC_GLORY_MIN + 1} pt（帯全体・ローマ数字なし）`,
+    rankName: "Gミシック",
+    rangeLabel: `${G_MYTHIC_MIN} 〜 ${G_MYTHIC_MAX}`,
+    tierWidthLabel: `${G_MYTHIC_TIER_WIDTH_PT} pt（IV〜I の各ティア）`,
+  });
+  rows.push({
+    rankId: "mythic-i",
+    rankName: "Iミシック",
+    rangeLabel: `${I_MYTHIC_MIN} 〜 ${MAX_RATING.toLocaleString("ja-JP")}`,
+    tierWidthLabel: "ティアなし（レートのみ上昇）",
   });
   return rows;
 }
@@ -135,20 +152,43 @@ function tierBoundsInBand(
   return { low, high };
 }
 
+function gMythicTierBounds(tierRoman: RomanTier): { low: number; high: number } {
+  const idx = ROMAN_BY_INDEX.indexOf(tierRoman);
+  const w = G_MYTHIC_TIER_WIDTH_PT;
+  const low = G_MYTHIC_MIN + idx * w;
+  const high = Math.min(G_MYTHIC_MAX, low + w - 1);
+  return { low, high };
+}
+
 /**
  * レートからランク名・画像・ローマ字ティアを返す（シーズンレート基準）。
  */
 export function getRankData(rate: number): RankData {
   const r = clampRate(rate);
 
-  if (r >= MYTHIC_GLORY_MIN) {
+  if (r >= I_MYTHIC_MIN) {
+    return {
+      rankId: "mythic-i",
+      rankName: "Iミシック",
+      imagePath: rankImagePath("mythic-i"),
+      tierRoman: null,
+      bracketMin: I_MYTHIC_MIN,
+      bracketMax: MAX_RATING,
+    };
+  }
+
+  if (r >= G_MYTHIC_MIN && r <= G_MYTHIC_MAX) {
+    const w = G_MYTHIC_TIER_WIDTH_PT;
+    const idx = Math.min(3, Math.max(0, Math.floor((r - G_MYTHIC_MIN) / w)));
+    const tierRoman = ROMAN_BY_INDEX[idx]!;
+    const { low, high } = gMythicTierBounds(tierRoman);
     return {
       rankId: "mythic-glory",
-      rankName: "ミシックグローリー",
+      rankName: "Gミシック",
       imagePath: rankImagePath("mythic-glory"),
-      tierRoman: null,
-      bracketMin: MYTHIC_GLORY_MIN,
-      bracketMax: MAX_RATING,
+      tierRoman,
+      bracketMin: low,
+      bracketMax: high,
     };
   }
 
@@ -169,7 +209,7 @@ export function getRankData(rate: number): RankData {
   };
 }
 
-/** 下位→高位（ミシックグローリーが最終） */
+/** 下位→高位 */
 const LADDER_RANK_ORDER: readonly RankId[] = [
   "warrior",
   "elite",
@@ -179,6 +219,7 @@ const LADDER_RANK_ORDER: readonly RankId[] = [
   "legend",
   "mythic",
   "mythic-glory",
+  "mythic-i",
 ] as const;
 
 function rankLadderIndex(rankId: RankId): number {
@@ -237,8 +278,8 @@ export function getTierProgress(rate: number): TierProgress {
     return { progressPercent: 100, pointsToNext: 0, isFinal: true };
   }
 
-  if (r >= MYTHIC_GLORY_MIN) {
-    const low = MYTHIC_GLORY_MIN;
+  if (r >= I_MYTHIC_MIN) {
+    const low = I_MYTHIC_MIN;
     const high = MAX_RATING;
     const denom = high - low;
     const progressPercent =
@@ -246,6 +287,28 @@ export function getTierProgress(rate: number): TierProgress {
         ? 100
         : Math.max(0, Math.min(100, ((r - low) / denom) * 100));
     const pointsToNext = Math.max(0, Math.ceil(high - r));
+    return {
+      progressPercent,
+      pointsToNext,
+      isFinal: false,
+    };
+  }
+
+  if (r >= G_MYTHIC_MIN && r <= G_MYTHIC_MAX) {
+    const w = G_MYTHIC_TIER_WIDTH_PT;
+    const idx = Math.min(3, Math.max(0, Math.floor((r - G_MYTHIC_MIN) / w)));
+    const tierRoman = ROMAN_BY_INDEX[idx]!;
+    const { low, high } = gMythicTierBounds(tierRoman);
+    const denom = high - low;
+    const progressPercent =
+      denom <= 0
+        ? 100
+        : Math.max(0, Math.min(100, ((r - low) / denom) * 100));
+
+    const isTierI = tierRoman === "I";
+    const nextThreshold = isTierI ? I_MYTHIC_MIN : high + 1;
+    const pointsToNext = Math.max(0, Math.ceil(nextThreshold - r));
+
     return {
       progressPercent,
       pointsToNext,
@@ -270,10 +333,10 @@ export function getTierProgress(rate: number): TierProgress {
   if (!isTierI) {
     nextThreshold = high + 1;
   } else if (band.id === "mythic") {
-    nextThreshold = MYTHIC_GLORY_MIN;
+    nextThreshold = G_MYTHIC_MIN;
   } else {
     const nextBand = RANK_BANDS[RANK_BANDS.indexOf(band) + 1];
-    nextThreshold = nextBand ? nextBand.min : MYTHIC_GLORY_MIN;
+    nextThreshold = nextBand ? nextBand.min : G_MYTHIC_MIN;
   }
 
   const pointsToNext = Math.max(0, Math.ceil(nextThreshold - r));
@@ -286,7 +349,7 @@ export function getTierProgress(rate: number): TierProgress {
 }
 
 export type TierBarFromRate = {
-  /** 現在ティアの幅（RANK_BANDS の tierWidth。ミシックグローリーは帯全体幅） */
+  /** 現在ティアの幅（RANK_BANDS の tierWidth。Iミシックは帯全体幅） */
   tierSpan: number;
   /**
    * ティア下限からのオフセット（0 〜 tierSpan-1）。ティア下限で 0、上限付近で最大。
@@ -314,8 +377,8 @@ export function getTierBarFromSeasonRate(seasonRate: number): TierBarFromRate {
     };
   }
 
-  if (r >= MYTHIC_GLORY_MIN) {
-    const low = MYTHIC_GLORY_MIN;
+  if (r >= I_MYTHIC_MIN) {
+    const low = I_MYTHIC_MIN;
     const high = MAX_RATING;
     const w = high - low + 1;
     const rInt = Math.floor(r);
@@ -329,6 +392,34 @@ export function getTierBarFromSeasonRate(seasonRate: number): TierBarFromRate {
       fillRatio,
       pointsToNext: tp.pointsToNext,
       isFinal: false,
+    };
+  }
+
+  if (r >= G_MYTHIC_MIN && r <= G_MYTHIC_MAX) {
+    const w = G_MYTHIC_TIER_WIDTH_PT;
+    const idx = Math.min(3, Math.max(0, Math.floor((r - G_MYTHIC_MIN) / w)));
+    const tierRoman = ROMAN_BY_INDEX[idx]!;
+    const { low, high } = gMythicTierBounds(tierRoman);
+
+    const rInt = Math.floor(r);
+    const offsetFromLow =
+      rInt < low ? 0 : Math.min(w - 1, Math.max(0, rInt - low));
+    const progressInTier = w <= 1 ? 0 : offsetFromLow;
+    const fillRatio =
+      w <= 1
+        ? rInt >= low && rInt <= high
+          ? 1
+          : 0
+        : Math.min(1, Math.max(0, (rInt - low) / (w - 1)));
+
+    const tp = getTierProgress(seasonRate);
+
+    return {
+      tierSpan: w,
+      progressInTier,
+      fillRatio,
+      pointsToNext: tp.pointsToNext,
+      isFinal: tp.isFinal,
     };
   }
 
@@ -370,6 +461,7 @@ const ACCENT_HEX: Record<RankId, string> = {
   legend: "#fbbf24",
   mythic: "#f87171",
   "mythic-glory": "#fde047",
+  "mythic-i": "#fff7c2",
 };
 
 export function getRankAccentHex(rankId: RankId): string {

@@ -5,12 +5,15 @@ import { useState } from "react";
 import { RankEmblemByRankId } from "@/components/RankLogoMark";
 import { MAX_RATING } from "@/lib/rating";
 import {
+  G_MYTHIC_MAX,
+  G_MYTHIC_MIN,
+  G_MYTHIC_TIER_WIDTH_PT,
   getRankAccentHex,
   getRankData,
   getRankLogoContentScale,
   getRankRangeTableRows,
   getTierBarFromSeasonRate,
-  MYTHIC_GLORY_MIN,
+  I_MYTHIC_MIN,
   RANK_TIER_WIDTH_PT,
 } from "@/lib/rankUtils";
 
@@ -61,8 +64,49 @@ export function RankDetailView(props: Props) {
 
         {tierBar.isFinal ? (
           <p className="text-sm leading-relaxed text-white/65">
-            最終ランクのため、これ以上の昇格はありません。
+            最終到達のため、これ以上レートは増えません。
           </p>
+        ) : data.rankId === "mythic-i" ? (
+          <>
+            <p className="text-base leading-relaxed text-white/90 sm:text-lg">
+              上限（{MAX_RATING.toLocaleString("ja-JP")}）まであと{" "}
+              <span className="font-semibold tabular-nums text-[#ece5d8]">
+                {tierBar.pointsToNext}
+              </span>{" "}
+              ポイント
+            </p>
+            <p className="text-xs leading-relaxed text-white/50">
+              Iミシックはティアがありません。シーズンレートがそのまま伸びていきます。
+            </p>
+
+            <div className="rounded-xl border border-[#ece5d8]/12 bg-[#0d1324]/80 px-3.5 py-3 sm:px-4">
+              <div className="flex items-center justify-between gap-3 text-xs sm:text-sm">
+                <span className="font-medium text-[#ece5d8]/75">
+                  レート進捗
+                </span>
+                <span className="shrink-0 tabular-nums font-semibold text-[#ece5d8]">
+                  {Math.round(rankDisplayRating).toLocaleString("ja-JP")} /{" "}
+                  {MAX_RATING.toLocaleString("ja-JP")}
+                </span>
+              </div>
+              <div
+                className="mt-2.5 h-2.5 w-full overflow-hidden rounded-full bg-[#0a0f1e] shadow-inner shadow-black/40 ring-1 ring-[#ece5d8]/12"
+                role="progressbar"
+                aria-valuenow={Math.round(rankDisplayRating)}
+                aria-valuemin={I_MYTHIC_MIN}
+                aria-valuemax={MAX_RATING}
+                aria-label="Iミシック帯のレート進捗"
+              >
+                <div
+                  className="h-full rounded-full bg-gradient-to-r from-emerald-600/90 via-emerald-500/85 to-amber-400/80 shadow-[0_0_12px_-2px_rgba(52,211,153,0.45)] transition-[width] duration-300"
+                  style={{
+                    width: `${Math.round(tierBar.fillRatio * 100)}%`,
+                    boxShadow: `inset 0 0 0 1px ${accent}44`,
+                  }}
+                />
+              </div>
+            </div>
+          </>
         ) : (
           <>
             <p className="text-base leading-relaxed text-white/90 sm:text-lg">
@@ -137,11 +181,15 @@ export function RankDetailView(props: Props) {
             シーズンレート: {Math.round(seasonRating ?? rankDisplayRating)}
           </p>
           <p className="mt-1 text-xs text-white/45">
-            ランク・ティアはシーズンレートのみで決まります（ティア幅{" "}
+            ランク・ティアはシーズンレートのみで決まります（ウォリアー〜ミシックは各ティア{" "}
             <span className="tabular-nums text-white/55">
               {RANK_TIER_WIDTH_PT} pt
             </span>
-            ／段、ウォリアー〜ミシック）。
+            、Gミシックは{" "}
+            <span className="tabular-nums text-white/55">
+              {G_MYTHIC_TIER_WIDTH_PT} pt
+            </span>
+            ）。
           </p>
         </div>
       </div>
@@ -162,11 +210,20 @@ export function RankDetailView(props: Props) {
             <span className="tabular-nums font-medium text-white/80">
               {RANK_TIER_WIDTH_PT} pt
             </span>
-            幅です。ミシックグローリーは{" "}
+            幅です。Gミシック（
             <span className="tabular-nums text-white/80">
-              {MYTHIC_GLORY_MIN} 〜 {MAX_RATING}
-            </span>{" "}
-            の単一帯です。
+              {G_MYTHIC_MIN} 〜 {G_MYTHIC_MAX.toLocaleString("ja-JP")}
+            </span>
+            ）は各ティア{" "}
+            <span className="tabular-nums font-medium text-white/80">
+              {G_MYTHIC_TIER_WIDTH_PT} pt
+            </span>
+            幅です。Iミシック（
+            <span className="tabular-nums text-white/80">
+              {I_MYTHIC_MIN.toLocaleString("ja-JP")} 〜{" "}
+              {MAX_RATING.toLocaleString("ja-JP")}
+            </span>
+            ）はティアがなく、シーズンレートだけが増えていきます。
           </li>
           <li>
             2 週間に 1 度、全員のシーズンレートが 1 ランク分（500pt）ダウンします。次回実行は4月27日です。

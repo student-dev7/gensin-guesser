@@ -24,9 +24,9 @@ service cloud.firestore {
         && runId.matches('^' + request.auth.uid + '_.+')
         && request.resource.data.uid == request.auth.uid
         && request.resource.data.handCount >= 1
-        && request.resource.data.handCount <= 7
+        && request.resource.data.handCount <= 999
         && request.resource.data.guessCount >= 0
-        && request.resource.data.guessCount <= 7;
+        && request.resource.data.guessCount <= 999;
       allow update, delete: if false;
     }
 
@@ -38,6 +38,33 @@ service cloud.firestore {
 
     // ロビーチャット（匿名 UID で送受信）
     // hasOnly だとフィールド追加のたびにルール更新が必要。hasAll なら必須キーだけ揃えばよく、任意フィールドを後から足しやすい
+    // 対戦ルーム（5桁コードがドキュメント ID）
+    match /rooms/{roomId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && roomId.size() == 5
+        && request.resource.data.hostUid == request.auth.uid
+        && request.resource.data.code == roomId
+        && request.resource.data.name is string
+        && request.resource.data.name.size() >= 1
+        && request.resource.data.name.size() <= 40
+        && request.resource.data.isPublic is bool
+        && request.resource.data.maxHandsLimited is bool
+        && request.resource.data.moveTimeoutSec is int
+        && request.resource.data.moveTimeoutSec == 30
+        && request.resource.data.passwordHash is string
+        && request.resource.data.passwordHash.size() <= 64
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if request.auth != null
+        && resource.data.hostUid == request.auth.uid
+        && request.resource.data.hostUid == resource.data.hostUid
+        && request.resource.data.code == resource.data.code
+        && request.resource.data.passwordHash == resource.data.passwordHash;
+      allow delete: if request.auth != null
+        && resource.data.hostUid == request.auth.uid;
+    }
+
     match /chat_messages/{msgId} {
       allow read: if true;
       allow create: if request.auth != null

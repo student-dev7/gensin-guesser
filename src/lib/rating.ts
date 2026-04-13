@@ -41,7 +41,7 @@ export function handScoreFromAvg(myHandCount: number, mAvgHandCount: number) {
 /** プレイヤーレートの下限（負けでもこれ未満にならない。シーズン初期値も同じ 1500） */
 export const MIN_RATING = 1500;
 /** シーズンの current_rate・rating の上限 */
-export const MAX_RATING = 5000;
+export const MAX_RATING = 100000;
 
 export function clampRating(rating: number) {
   return Math.max(MIN_RATING, Math.min(MAX_RATING, rating));

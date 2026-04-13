@@ -6,7 +6,13 @@ import { useEffect, useState } from "react";
 import { RankingAvatar } from "@/components/RankingAvatar";
 import { RankLogoMark } from "@/components/RankLogoMark";
 import { isAdminUid } from "@/lib/adminUids";
+import { MAX_RATING } from "@/lib/rating";
 import { RANK_BAND_WIDTH_PT } from "@/lib/rankUtils";
+import {
+  PatchNotesBattleSection,
+  PatchNotesRateSection,
+  PatchNotesStatsSection,
+} from "@/components/PatchNotesNoticeContent";
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
@@ -53,6 +59,9 @@ export function RankingTable({ rows, error }: Props) {
   );
   const [noticeOpen, setNoticeOpen] = useState(false);
   const [noticeRateResetExpanded, setNoticeRateResetExpanded] = useState(false);
+  const [noticePatchSection, setNoticePatchSection] = useState<
+    "battle" | "stats" | "rate" | null
+  >(null);
   const [massReset1500Open, setMassReset1500Open] = useState(false);
   const [massReset1500Pass, setMassReset1500Pass] = useState("");
   const [massReset1500Loading, setMassReset1500Loading] = useState(false);
@@ -109,6 +118,7 @@ export function RankingTable({ rows, error }: Props) {
               onClick={() => {
                 setNoticeOpen(true);
                 setNoticeRateResetExpanded(false);
+                setNoticePatchSection(null);
               }}
               className="inline-flex shrink-0 items-center justify-center rounded-full border border-sky-500/45 bg-sky-950/35 px-4 py-2 text-xs font-medium text-sky-100/95 shadow-sm transition hover:border-sky-400/60 hover:bg-sky-950/55 sm:px-6 sm:py-2.5 sm:text-sm"
             >
@@ -174,7 +184,7 @@ export function RankingTable({ rows, error }: Props) {
             onClick={() => setNoticeOpen(false)}
           >
             <div
-              className="max-h-[min(90vh,36rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-sky-500/30 bg-[#12182a] p-6 shadow-2xl"
+              className="max-h-[min(90vh,42rem)] w-full max-w-lg overflow-y-auto rounded-2xl border border-sky-500/30 bg-[#12182a] p-6 shadow-2xl"
               onClick={(e) => e.stopPropagation()}
             >
               <h2
@@ -222,6 +232,59 @@ export function RankingTable({ rows, error }: Props) {
                   </div>
                 )}
               </div>
+
+              <p className="mt-5 text-center text-xs font-medium text-[#ece5d8]/60">
+                ゲームガイド（旧パッチノート）
+              </p>
+              <div className="mt-2 space-y-2 rounded-xl border border-[#ece5d8]/15 bg-[#0a0f1e]/80">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setNoticePatchSection((s) => (s === "battle" ? null : "battle"))
+                  }
+                  aria-expanded={noticePatchSection === "battle"}
+                  className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-semibold text-amber-100/95 transition hover:bg-white/[0.04]"
+                >
+                  <span>対戦方式の変更について</span>
+                  <span className="tabular-nums text-white/50">
+                    {noticePatchSection === "battle" ? "−" : "+"}
+                  </span>
+                </button>
+                {noticePatchSection === "battle" && <PatchNotesBattleSection />}
+              </div>
+              <div className="mt-2 space-y-2 rounded-xl border border-[#ece5d8]/15 bg-[#0a0f1e]/80">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setNoticePatchSection((s) => (s === "stats" ? null : "stats"))
+                  }
+                  aria-expanded={noticePatchSection === "stats"}
+                  className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-semibold text-amber-100/95 transition hover:bg-white/[0.04]"
+                >
+                  <span>キャラ統計・ランクについて</span>
+                  <span className="tabular-nums text-white/50">
+                    {noticePatchSection === "stats" ? "−" : "+"}
+                  </span>
+                </button>
+                {noticePatchSection === "stats" && <PatchNotesStatsSection />}
+              </div>
+              <div className="mt-2 space-y-2 rounded-xl border border-[#ece5d8]/15 bg-[#0a0f1e]/80">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setNoticePatchSection((s) => (s === "rate" ? null : "rate"))
+                  }
+                  aria-expanded={noticePatchSection === "rate"}
+                  className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left text-sm font-semibold text-amber-100/95 transition hover:bg-white/[0.04]"
+                >
+                  <span>レート増減の目安</span>
+                  <span className="tabular-nums text-white/50">
+                    {noticePatchSection === "rate" ? "−" : "+"}
+                  </span>
+                </button>
+                {noticePatchSection === "rate" && <PatchNotesRateSection />}
+              </div>
+
               <div className="mt-6 flex justify-center">
                 <button
                   type="button"
@@ -679,13 +742,14 @@ export function RankingTable({ rows, error }: Props) {
               </p>
               <p className="mt-1 font-mono text-xs text-white/45">{adminEditUid}</p>
               <label className="mt-4 block text-xs font-medium text-[#ece5d8]/80">
-                新しいシーズンレート（1500〜5000 に丸められます）
+                新しいシーズンレート（1500〜{MAX_RATING.toLocaleString("ja-JP")}{" "}
+                に丸められます）
               </label>
               <input
                 type="number"
                 inputMode="numeric"
                 min={1500}
-                max={5000}
+                max={MAX_RATING}
                 value={adminEditRatingDraft}
                 onChange={(e) => setAdminEditRatingDraft(e.target.value)}
                 className="mt-1 w-full rounded-xl border border-[#ece5d8]/20 bg-[#0a0f1e] px-4 py-3 text-sm text-white outline-none tabular-nums focus:border-amber-400/45"

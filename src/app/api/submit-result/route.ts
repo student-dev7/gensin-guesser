@@ -29,6 +29,7 @@ import {
 import { isAdminUid } from "@/lib/adminUids";
 import { USER_FIELD_NEXT_WIN_RATING_DOUBLE } from "@/lib/shop";
 import { validateDisplayName } from "@/lib/validateDisplayName";
+import { ROOM_UNLIMITED_GUESS_CAP } from "@/lib/roomTypes";
 
 type SubmitBody = {
   idToken: string;
@@ -46,11 +47,17 @@ type SubmitBody = {
   surrendered?: boolean;
   /** 個人モード: シーズンレート・ゴールドは変えない */
   personalMode?: boolean;
+  /**
+   * このラウンドの予想回数上限（通常 7、ルーム無制限は最大 999）。
+   * 未指定時は 7。
+   */
+  maxGuessCap?: number;
 };
 
 /** 降参・手数切れなど won:false の runs 記録用ペナルティ手数 */
 const LOSS_RECORD_HANDS = 7;
-const MAX_GUESSES_ROUND = 7;
+const DEFAULT_MAX_GUESS_CAP = 7;
+const GHOST_RUN_HAND_CAP = 7;
 const MIN_GUESSES_TO_RESIGN = 4;
 
 async function resolveGhostHandCount(
@@ -70,7 +77,7 @@ async function resolveGhostHandCount(
     const hc = gd.handCount;
     if (typeof hc !== "number" || !Number.isFinite(hc)) return undefined;
     const rounded = Math.round(hc);
-    if (rounded < 1 || rounded > MAX_GUESSES_ROUND) return undefined;
+    if (rounded < 1 || rounded > GHOST_RUN_HAND_CAP) return undefined;
     return rounded;
   } catch {
     return undefined;
@@ -104,6 +111,30 @@ export async function POST(req: Request) {
   const surrendered = body.surrendered === true;
   const personalMode = body.personalMode === true;
 
+  const capRaw = (body as SubmitBody).maxGuessCap;
+  let maxGuessCap = DEFAULT_MAX_GUESS_CAP;
+  if (capRaw !== undefined) {
+    if (typeof capRaw !== "number" || !Number.isFinite(capRaw)) {
+      return NextResponse.json(
+        { ok: false, error: "maxGuessCap が不正です" },
+        { status: 400 }
+      );
+    }
+    maxGuessCap = Math.round(capRaw);
+    if (
+      maxGuessCap < DEFAULT_MAX_GUESS_CAP ||
+      maxGuessCap > ROOM_UNLIMITED_GUESS_CAP
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `maxGuessCap は ${DEFAULT_MAX_GUESS_CAP}〜${ROOM_UNLIMITED_GUESS_CAP} で指定してください`,
+        },
+        { status: 400 }
+      );
+    }
+  }
+
   if (!idToken || typeof idToken !== "string") {
     return NextResponse.json(
       { ok: false, error: "Missing idToken" },
@@ -130,7 +161,7 @@ export async function POST(req: Request) {
   }
 
   const guessCount = Math.round(rawGuessCount);
-  if (guessCount < 0 || guessCount > MAX_GUESSES_ROUND) {
+  if (guessCount < 0 || guessCount > maxGuessCap) {
     return NextResponse.json(
       { ok: false, error: "guessCount out of range" },
       { status: 400 }
@@ -142,7 +173,7 @@ export async function POST(req: Request) {
   if (
     !won &&
     guessCount < MIN_GUESSES_TO_RESIGN &&
-    guessCount !== MAX_GUESSES_ROUND
+    guessCount !== maxGuessCap
   ) {
     if (!lostToGhostClaim) {
       return NextResponse.json(
