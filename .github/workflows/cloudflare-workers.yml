@@ -47,6 +47,9 @@ jobs:
           NEXT_PUBLIC_FIREBASE_APP_ID: ${{ secrets.NEXT_PUBLIC_FIREBASE_APP_ID }}
         run: npx opennextjs-cloudflare build
 
+      - name: Debug — show eval patterns in bundle
+        run: grep -R "eval(" .open-next --include="*.js" --include="*.mjs" 2>/dev/null | head -80 || true
+
       - name: Patch eval(require) for Workers runtime
         run: node scripts/patch-opennext-eval.mjs
 
