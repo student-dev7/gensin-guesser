@@ -4,6 +4,8 @@ export const ROOM_CODE_CHARS =
 
 export const ROOM_CODE_LEN = 5;
 export const ROOM_MOVE_TIMEOUT_SEC_DEFAULT = 30;
+/** 公開一覧の「3/4」表示用・定員のデフォルト（作成時に保存） */
+export const ROOM_MAX_PLAYERS_DEFAULT = 4;
 /** Firestore / API との整合用（実質無制限モードの上限） */
 export const ROOM_UNLIMITED_GUESS_CAP = 999;
 
@@ -16,8 +18,21 @@ export type RoomDocument = {
   maxHandsLimited: boolean;
   /** 1手あたりの秒数（現状 30 固定） */
   moveTimeoutSec: number;
+  /** 定員（一覧の n/max 表示用。未設定の旧ルームは ROOM_MAX_PLAYERS_DEFAULT 扱い） */
+  maxPlayers?: number;
   /** パスワードありのとき SHA-256 hex（code|password） */
   passwordHash: string;
+  /**
+   * false: ロビー（2人以上＋ホストの開始まで待機）
+   * true: 試合開始済み。未設定の旧ドキュメントは「開始済み」とみなす。
+   */
+  matchStarted?: boolean;
+  /** ホストが開始したときの共有お題（キャラ名） */
+  targetCharacterName?: string;
+  /** 共有ラウンド ID（開始時にホストが発行） */
+  activeRoundId?: string;
+  /** 最終活動（放置ルーム削除の目安。クライアントが定期的に更新） */
+  lastActivityAt?: unknown;
   createdAt: unknown;
   updatedAt: unknown;
 };

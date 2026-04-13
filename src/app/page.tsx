@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   Suspense,
   useCallback,
@@ -13,11 +13,14 @@ import {
 import CHARACTERS from "../data/characters.json";
 import { onAuthStateChanged } from "firebase/auth";
 import {
+  collection,
+  deleteDoc,
   doc,
   getDoc,
   getFirestore,
   onSnapshot,
   serverTimestamp,
+  setDoc,
   updateDoc,
 } from "firebase/firestore";
 import { ChatRoomPanel } from "../components/ChatRoomPanel";
@@ -38,13 +41,20 @@ import {
   type RoomDocument,
 } from "@/lib/roomTypes";
 import { roomPasswordInputKey, sha256HexUtf8 } from "@/lib/roomHash";
+import { dissolveRoomClient } from "@/lib/roomDissolve";
+import { PLAYER_NAME_STORAGE_KEY } from "@/lib/playerNameStorage";
 
 type Character = (typeof CHARACTERS)[number];
+
+type RoomPresencePlayer = {
+  uid: string;
+  displayName: string;
+  joinedMs: number;
+};
 
 const MAX_GUESSES = 7;
 /** これ未満では降参不可（API の MIN と一致） */
 const MIN_GUESSES_TO_RESIGN = 4;
-const PLAYER_NAME_KEY = "genshin-guesser-player-name";
 /** 対戦（ゴーストあり） / 個人（ゴーストなし） */
 const BATTLE_MODE_KEY = "genshin-guesser-battle-mode";
 const ACCENT = "text-[#ece5d8]";
@@ -100,6 +110,7 @@ type RatingStats = {
 };
 
 function Home() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const list = CHARACTERS as Character[];
 
@@ -154,6 +165,30 @@ function Home() {
   const [roomPwError, setRoomPwError] = useState<string | null>(null);
   const [roomPwBusy, setRoomPwBusy] = useState(false);
   const [moveSecondsLeft, setMoveSecondsLeft] = useState<number | null>(null);
+  const [roomPresencePlayers, setRoomPresencePlayers] = useState<
+    RoomPresencePlayer[]
+  >([]);
+  const [roomJoinToast, setRoomJoinToast] = useState<string | null>(null);
+  const presenceBaselineRef = useRef(false);
+  const prevPresenceIdsRef = useRef<Set<string>>(new Set());
+  const [roomStartBusy, setRoomStartBusy] = useState(false);
+  const [roomDissolveBusy, setRoomDissolveBusy] = useState(false);
+  const [roomLeaveBusy, setRoomLeaveBusy] = useState(false);
+  const roomSyncedRoundRef = useRef<string | null>(null);
+  const presenceDocRef = useRef<ReturnType<typeof doc> | null>(null);
+
+  /** roomDoc はスナップショットのたびに新オブジェクトになる。依存配列に直参照すると無限ループの原因になる */
+  const roomDocPresent = roomDoc != null;
+
+  const roomPresenceCount = roomPresencePlayers.length;
+
+  const roomInLobby = useMemo(
+    () =>
+      Boolean(roomCodeFromUrl) &&
+      roomDoc != null &&
+      roomDoc.matchStarted === false,
+    [roomCodeFromUrl, roomDoc]
+  );
 
   const maxGuessesThisRound = useMemo(() => {
     if (!roomDoc) return MAX_GUESSES;
@@ -184,7 +219,8 @@ function Home() {
         setRoomMissing(false);
         setRoomDoc(snap.data() as RoomDocument);
       },
-      () => {
+      (err) => {
+        console.warn("[room] snapshot error", err);
         setRoomDocLoading(false);
         setRoomMissing(true);
         setRoomDoc(null);
@@ -192,6 +228,262 @@ function Home() {
     );
     return () => unsub();
   }, [roomCodeFromUrl]);
+
+  useEffect(() => {
+    if (!roomCodeFromUrl) {
+      roomSyncedRoundRef.current = null;
+    }
+  }, [roomCodeFromUrl]);
+
+  useEffect(() => {
+    presenceBaselineRef.current = false;
+    prevPresenceIdsRef.current = new Set();
+    if (!roomCodeFromUrl || !roomDocPresent || roomMissing) {
+      setRoomPresencePlayers([]);
+      setRoomJoinToast(null);
+      return;
+    }
+    const db = getFirestore(getFirebaseAuth().app);
+    const col = collection(db, "rooms", roomCodeFromUrl, "presence");
+    const unsub = onSnapshot(
+      col,
+      (snap) => {
+        const players: RoomPresencePlayer[] = [];
+        snap.forEach((d) => {
+          const data = d.data();
+          const displayName =
+            typeof data.displayName === "string" && data.displayName.length > 0
+              ? data.displayName
+              : "???";
+          const ja = data.joinedAt as { toMillis?: () => number } | undefined;
+          const joinedMs =
+            ja && typeof ja.toMillis === "function" ? ja.toMillis() : 0;
+          players.push({ uid: d.id, displayName, joinedMs });
+        });
+        players.sort((a, b) => a.joinedMs - b.joinedMs);
+
+        if (!presenceBaselineRef.current) {
+          presenceBaselineRef.current = true;
+          prevPresenceIdsRef.current = new Set(players.map((p) => p.uid));
+          setRoomPresencePlayers(players);
+          return;
+        }
+
+        const myUid = getFirebaseAuth().currentUser?.uid ?? null;
+        const prev = prevPresenceIdsRef.current;
+        const newcomers = players.filter(
+          (p) => !prev.has(p.uid) && p.uid !== myUid
+        );
+        if (newcomers.length === 1) {
+          setRoomJoinToast(
+            `${newcomers[0]!.displayName}さんがやってきました`
+          );
+        } else if (newcomers.length > 1) {
+          setRoomJoinToast(
+            `${newcomers.map((n) => n.displayName).join("さん、")}さんがやってきました`
+          );
+        }
+        prevPresenceIdsRef.current = new Set(players.map((p) => p.uid));
+        setRoomPresencePlayers(players);
+      },
+      (err) => {
+        console.warn("[presence] snapshot error", err);
+        setRoomPresencePlayers([]);
+      }
+    );
+    return () => unsub();
+  }, [roomCodeFromUrl, roomDocPresent, roomMissing]);
+
+  useEffect(() => {
+    if (!roomCodeFromUrl || !roomDocPresent || !roomPwUnlocked || roomMissing) {
+      const p = presenceDocRef.current;
+      presenceDocRef.current = null;
+      if (p) void deleteDoc(p).catch(() => {});
+      return;
+    }
+    const nameCheck = validateDisplayName(playerName, {
+      ignoreBadSubstrings: isAdminUid(viewerUid),
+    });
+    if (!nameCheck.ok) {
+      const p = presenceDocRef.current;
+      presenceDocRef.current = null;
+      if (p) void deleteDoc(p).catch(() => {});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      await ensureAnonymousSession();
+      if (cancelled) return;
+      const uid = getFirebaseAuth().currentUser?.uid;
+      if (!uid) return;
+      const db = getFirestore(getFirebaseAuth().app);
+      const pref = doc(db, "rooms", roomCodeFromUrl, "presence", uid);
+      presenceDocRef.current = pref;
+      try {
+        const existing = await getDoc(pref);
+        const payload: Record<string, unknown> = {
+          displayName: nameCheck.name,
+        };
+        if (!existing.exists()) {
+          payload.joinedAt = serverTimestamp();
+        }
+        await setDoc(pref, payload, { merge: true });
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      const p = presenceDocRef.current;
+      presenceDocRef.current = null;
+      if (p) void deleteDoc(p).catch(() => {});
+    };
+  }, [
+    roomCodeFromUrl,
+    roomDocPresent,
+    roomPwUnlocked,
+    roomMissing,
+    playerName,
+    viewerUid,
+  ]);
+
+  useEffect(() => {
+    if (
+      !roomCodeFromUrl ||
+      !roomDoc?.matchStarted ||
+      !roomDoc.targetCharacterName ||
+      !roomDoc.activeRoundId
+    ) {
+      return;
+    }
+    if (roomSyncedRoundRef.current === roomDoc.activeRoundId) {
+      return;
+    }
+    roomSyncedRoundRef.current = roomDoc.activeRoundId;
+    const c = list.find((x) => x.name === roomDoc.targetCharacterName);
+    if (!c) return;
+    setTarget(c);
+    setRoundId(roomDoc.activeRoundId);
+    setGuesses([]);
+    setSurrendered(false);
+    setMessage(null);
+    setQuery("");
+    setRatingStats(null);
+    setSubmitError(null);
+    setSubmitLoading(false);
+    submitDoneRoundRef.current = null;
+    setGhost(null);
+    setGhostEcho(null);
+    ghostToastShownRef.current = false;
+  }, [
+    roomCodeFromUrl,
+    roomDoc?.matchStarted,
+    roomDoc?.targetCharacterName,
+    roomDoc?.activeRoundId,
+    list,
+  ]);
+
+  const handleRoomStartMatch = useCallback(async () => {
+    if (!roomCodeFromUrl || !roomDoc || viewerUid !== roomDoc.hostUid) return;
+    if (roomPresenceCount < 2) return;
+    setRoomStartBusy(true);
+    try {
+      await ensureAnonymousSession();
+      const char = pickRandomTarget(list);
+      const rid =
+        typeof crypto !== "undefined"
+          ? crypto.randomUUID()
+          : String(Date.now());
+      const db = getFirestore(getFirebaseAuth().app);
+      await updateDoc(doc(db, "rooms", roomCodeFromUrl), {
+        matchStarted: true,
+        targetCharacterName: char.name,
+        activeRoundId: rid,
+        lastActivityAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    } catch {
+      /* ignore */
+    } finally {
+      setRoomStartBusy(false);
+    }
+  }, [roomCodeFromUrl, roomDoc, viewerUid, roomPresenceCount, list]);
+
+  useEffect(() => {
+    if (
+      !roomCodeFromUrl ||
+      !roomDocPresent ||
+      roomMissing ||
+      !roomPwUnlocked
+    ) {
+      return;
+    }
+    const tick = () => {
+      void (async () => {
+        try {
+          await ensureAnonymousSession();
+          const db = getFirestore(getFirebaseAuth().app);
+          await updateDoc(doc(db, "rooms", roomCodeFromUrl), {
+            lastActivityAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        } catch {
+          /* ignore */
+        }
+      })();
+    };
+    tick();
+    const id = window.setInterval(tick, 90_000);
+    return () => clearInterval(id);
+  }, [roomCodeFromUrl, roomDocPresent, roomMissing, roomPwUnlocked]);
+
+  const handleRoomDissolve = useCallback(async () => {
+    if (!roomCodeFromUrl || !roomDoc || viewerUid !== roomDoc.hostUid) return;
+    if (
+      !window.confirm(
+        "ルームを解散します。全員がこのURLから外れます。よろしいですか？"
+      )
+    ) {
+      return;
+    }
+    setRoomDissolveBusy(true);
+    try {
+      await ensureAnonymousSession();
+      const db = getFirestore(getFirebaseAuth().app);
+      await dissolveRoomClient(db, roomCodeFromUrl);
+      router.push("/rooms");
+    } catch {
+      /* ignore */
+    } finally {
+      setRoomDissolveBusy(false);
+    }
+  }, [roomCodeFromUrl, roomDoc, viewerUid, router]);
+
+  const handleRoomLeave = useCallback(async () => {
+    if (!roomCodeFromUrl) return;
+    if (!window.confirm("このルームから抜けますか？（ルーム一覧へ移動します）")) {
+      return;
+    }
+    setRoomLeaveBusy(true);
+    try {
+      await ensureAnonymousSession();
+      const uid = getFirebaseAuth().currentUser?.uid;
+      const db = getFirestore(getFirebaseAuth().app);
+      if (uid) {
+        await deleteDoc(
+          doc(db, "rooms", roomCodeFromUrl, "presence", uid)
+        ).catch(() => {});
+      }
+      try {
+        sessionStorage.removeItem(roomPasswordInputKey(roomCodeFromUrl));
+      } catch {
+        /* ignore */
+      }
+      router.push("/rooms");
+    } finally {
+      setRoomLeaveBusy(false);
+    }
+  }, [roomCodeFromUrl, router]);
 
   useEffect(() => {
     if (!roomCodeFromUrl) {
@@ -297,7 +589,7 @@ function Home() {
 
   useEffect(() => {
     try {
-      const s = localStorage.getItem(PLAYER_NAME_KEY);
+      const s = localStorage.getItem(PLAYER_NAME_STORAGE_KEY);
       if (s) setPlayerName(s);
     } catch {
       /* ignore */
@@ -328,6 +620,10 @@ function Home() {
     if (!battleModeVs) {
       return;
     }
+    // リアルタイムルームでは他プレイヤーと同じお題を共有するためゴーストは使わない
+    if (roomCodeFromUrl) {
+      return;
+    }
     let cancelled = false;
     void (async () => {
       try {
@@ -351,7 +647,7 @@ function Home() {
     return () => {
       cancelled = true;
     };
-  }, [target.name, roundId, battleModeVs]);
+  }, [target.name, roundId, battleModeVs, roomCodeFromUrl]);
 
   useEffect(() => {
     if (!ghost) return;
@@ -369,11 +665,17 @@ function Home() {
 
   useEffect(() => {
     try {
-      localStorage.setItem(PLAYER_NAME_KEY, playerName);
+      localStorage.setItem(PLAYER_NAME_STORAGE_KEY, playerName);
     } catch {
       /* ignore */
     }
   }, [playerName]);
+
+  useEffect(() => {
+    if (!roomJoinToast) return;
+    const t = window.setTimeout(() => setRoomJoinToast(null), 4500);
+    return () => clearTimeout(t);
+  }, [roomJoinToast]);
 
   useEffect(() => {
     if (!nameModalOpen) return;
@@ -414,14 +716,22 @@ function Home() {
     (!roomDocLoading &&
       !roomMissing &&
       roomDoc != null &&
-      roomPwUnlocked);
+      roomPwUnlocked &&
+      roomDoc.matchStarted !== false);
 
   useEffect(() => {
     finishedRef.current = finished;
   }, [finished]);
 
   useEffect(() => {
-    if (!roomCodeFromUrl || !roomDoc || !roomPwUnlocked || roomMissing || finished) {
+    if (
+      !roomCodeFromUrl ||
+      !roomDoc ||
+      !roomPwUnlocked ||
+      roomMissing ||
+      finished ||
+      roomInLobby
+    ) {
       setMoveSecondsLeft(null);
       return;
     }
@@ -436,10 +746,18 @@ function Home() {
     roomMissing,
     finished,
     moveTimeoutSec,
+    roomInLobby,
   ]);
 
   useEffect(() => {
-    if (!roomCodeFromUrl || !roomDoc || !roomPwUnlocked || roomMissing || finished) {
+    if (
+      !roomCodeFromUrl ||
+      !roomDoc ||
+      !roomPwUnlocked ||
+      roomMissing ||
+      finished ||
+      roomInLobby
+    ) {
       return;
     }
     const tick = () => {
@@ -476,6 +794,7 @@ function Home() {
     guesses.length,
     roundId,
     moveTimeoutSec,
+    roomInLobby,
   ]);
 
   const suggestions = useMemo(() => {
@@ -713,6 +1032,14 @@ function Home() {
           {ghostEcho}
         </div>
       )}
+      {roomJoinToast && (
+        <div
+          className="fixed left-1/2 top-[7.5rem] z-[95] max-w-[min(22rem,calc(100vw-2rem))] -translate-x-1/2 rounded-xl border border-sky-500/45 bg-sky-950/90 px-4 py-2.5 text-center text-sm font-medium text-sky-100 shadow-lg shadow-black/40"
+          role="status"
+        >
+          {roomJoinToast}
+        </div>
+      )}
       <header className="relative z-10 w-full shrink-0 border-b border-[#ece5d8]/10 bg-[#0a0f1e]/92 px-3 py-2 backdrop-blur-sm sm:px-6">
         <nav
           className="mx-auto flex w-full max-w-4xl flex-wrap items-center gap-x-2 gap-y-2 sm:gap-x-3"
@@ -811,10 +1138,71 @@ function Home() {
                   {" · "}
                   1手 {moveTimeoutSec} 秒（時間切れはミス扱い）
                 </p>
+                {roomInLobby && roomPwUnlocked && (
+                  <div className="rounded-xl border border-amber-400/35 bg-amber-950/25 px-3 py-3">
+                    <p className="text-sm font-medium text-amber-100/95">
+                      ロビー（参加 {roomPresenceCount} 人）
+                    </p>
+                    {!validateDisplayName(playerName, {
+                      ignoreBadSubstrings: isAdminUid(viewerUid),
+                    }).ok ? (
+                      <p className="mt-2 text-xs font-medium text-amber-200/95">
+                        ルームに表示されるには、上部の「名前変更」から 2〜12
+                        文字の表示名を設定してください。
+                      </p>
+                    ) : null}
+                    <p className="mt-1 text-xs leading-relaxed text-white/55">
+                      2人以上集まったらホストが開始します。表示名がプレイヤー一覧に並びます。
+                    </p>
+                    {roomPresencePlayers.length > 0 ? (
+                      <ul className="mt-3 space-y-1.5 rounded-lg border border-amber-500/20 bg-[#0a0f1e]/60 px-2.5 py-2">
+                        {roomPresencePlayers.map((p) => (
+                          <li
+                            key={p.uid}
+                            className="flex items-center justify-between gap-2 text-sm text-[#ece5d8]/95"
+                          >
+                            <span className="min-w-0 truncate">
+                              {p.displayName}
+                              {viewerUid === p.uid ? (
+                                <span className="ml-1.5 text-[0.65rem] text-white/45">
+                                  （あなた）
+                                </span>
+                              ) : null}
+                            </span>
+                            {roomDoc.hostUid === p.uid ? (
+                              <span className="shrink-0 rounded border border-amber-400/35 bg-amber-950/50 px-1.5 py-0.5 text-[0.65rem] font-medium uppercase tracking-wide text-amber-100/90">
+                                ホスト
+                              </span>
+                            ) : (
+                              <span className="shrink-0 text-[0.65rem] text-white/40">
+                                参加者
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                    {viewerUid === roomDoc.hostUid ? (
+                      <button
+                        type="button"
+                        disabled={roomPresenceCount < 2 || roomStartBusy}
+                        onClick={() => void handleRoomStartMatch()}
+                        className="mt-3 w-full rounded-xl border border-amber-400/50 bg-amber-900/40 px-3 py-2.5 text-sm font-semibold text-amber-50 transition hover:border-amber-300/60 disabled:cursor-not-allowed disabled:opacity-45"
+                      >
+                        {roomStartBusy ? "開始処理中…" : "ゲームを開始"}
+                      </button>
+                    ) : (
+                      <p className="mt-2 text-xs text-sky-200/85">
+                        ホストの開始を待っています…
+                      </p>
+                    )}
+                  </div>
+                )}
                 {moveSecondsLeft != null &&
                   roomPwUnlocked &&
                   !finished &&
-                  !roomDocLoading && (
+                  !roomDocLoading &&
+                  !roomInLobby && (
                     <p
                       className="text-base font-semibold tabular-nums text-amber-200/95"
                       role="timer"
@@ -841,6 +1229,7 @@ function Home() {
                                 doc(db, "rooms", roomCodeFromUrl),
                                 {
                                   maxHandsLimited: true,
+                                  lastActivityAt: serverTimestamp(),
                                   updatedAt: serverTimestamp(),
                                 }
                               );
@@ -868,6 +1257,7 @@ function Home() {
                                 doc(db, "rooms", roomCodeFromUrl),
                                 {
                                   maxHandsLimited: false,
+                                  lastActivityAt: serverTimestamp(),
                                   updatedAt: serverTimestamp(),
                                 }
                               );
@@ -886,6 +1276,33 @@ function Home() {
                       </button>
                     </div>
                   )}
+                {!roomDocLoading && roomPwUnlocked && viewerUid ? (
+                  <div className="mt-3 border-t border-[#ece5d8]/12 pt-3">
+                    <p className="text-[0.65rem] font-medium uppercase tracking-wide text-[#ece5d8]/50">
+                      ルーム操作
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={roomLeaveBusy || roomDissolveBusy}
+                        onClick={() => void handleRoomLeave()}
+                        className="rounded-lg border border-[#ece5d8]/30 bg-[#12182a]/80 px-3 py-2 text-xs font-medium text-[#ece5d8] transition hover:border-[#ece5d8]/50 disabled:opacity-50"
+                      >
+                        {roomLeaveBusy ? "抜けています…" : "ルームから抜ける"}
+                      </button>
+                      {roomDoc.hostUid === viewerUid ? (
+                        <button
+                          type="button"
+                          disabled={roomDissolveBusy || roomLeaveBusy}
+                          onClick={() => void handleRoomDissolve()}
+                          className="rounded-lg border border-rose-500/45 bg-rose-950/35 px-3 py-2 text-xs font-medium text-rose-100 transition hover:border-rose-400/55 disabled:opacity-50"
+                        >
+                          {roomDissolveBusy ? "解散中…" : "ルームを解散"}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>
@@ -972,7 +1389,9 @@ function Home() {
             </div>
 
             <p className="mt-3 text-center text-[0.8125rem] font-medium leading-snug text-amber-300/95 sm:text-sm">
-              ※クイズは既に始まっています。最初の1手を入力してください！
+              {roomInLobby
+                ? "ホストがゲームを開始するまでお待ちください。"
+                : "※クイズは既に始まっています。最初の1手を入力してください！"}
             </p>
           </div>
         </header>

@@ -2,10 +2,17 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   collection,
   doc,
+  getCountFromServer,
   getDoc,
   getFirestore,
   limit,
@@ -18,14 +25,23 @@ import {
 import {
   generateRoomCode,
   normalizeRoomCode,
+  ROOM_MAX_PLAYERS_DEFAULT,
   ROOM_MOVE_TIMEOUT_SEC_DEFAULT,
   type RoomDocument,
 } from "@/lib/roomTypes";
 import { roomPasswordInputKey, sha256HexUtf8 } from "@/lib/roomHash";
+import { dissolveRoomClient } from "@/lib/roomDissolve";
+import { isAdminUid } from "@/lib/adminUids";
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
 } from "@/lib/firebaseClient";
+import { onAuthStateChanged } from "firebase/auth";
+import { validateDisplayName } from "@/lib/validateDisplayName";
+import {
+  readStoredPlayerName,
+  writeStoredPlayerName,
+} from "@/lib/playerNameStorage";
 
 function firestoreDb() {
   return getFirestore(getFirebaseAuth().app);
@@ -34,6 +50,7 @@ function firestoreDb() {
 export function RoomsLobby() {
   const router = useRouter();
   const [createName, setCreateName] = useState("");
+  const [createPlayerName, setCreatePlayerName] = useState("");
   const [createPassword, setCreatePassword] = useState("");
   const [createPublic, setCreatePublic] = useState(true);
   const [maxHandsLimited, setMaxHandsLimited] = useState(true);
@@ -41,16 +58,39 @@ export function RoomsLobby() {
   const [createError, setCreateError] = useState<string | null>(null);
 
   const [joinCode, setJoinCode] = useState("");
+  const [joinPlayerName, setJoinPlayerName] = useState("");
   const [joinPassword, setJoinPassword] = useState("");
   const [joinBusy, setJoinBusy] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
 
   const [publicRooms, setPublicRooms] = useState<RoomDocument[]>([]);
+  const [presenceCountByCode, setPresenceCountByCode] = useState<
+    Record<string, number>
+  >({});
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [joinModalOpen, setJoinModalOpen] = useState(false);
+  const [viewerUid, setViewerUid] = useState<string | null>(null);
+  const [adminDeleteCode, setAdminDeleteCode] = useState<string | null>(null);
 
   useEffect(() => {
     void ensureAnonymousSession().catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const s = readStoredPlayerName();
+    if (s) {
+      setCreatePlayerName(s);
+      setJoinPlayerName(s);
+    }
+  }, []);
+
+  useEffect(() => {
+    const auth = getFirebaseAuth();
+    setViewerUid(auth.currentUser?.uid ?? null);
+    const unsub = onAuthStateChanged(auth, (u) =>
+      setViewerUid(u?.uid ?? null)
+    );
+    return () => unsub();
   }, []);
 
   useEffect(() => {
@@ -93,10 +133,54 @@ export function RoomsLobby() {
         });
         setPublicRooms(rows);
       },
-      () => setPublicRooms([])
+      (err) => {
+        console.warn("[public rooms] snapshot error", err);
+        setPublicRooms([]);
+      }
     );
     return () => unsub();
   }, []);
+
+  const publicRoomCodesKey = useMemo(
+    () => publicRooms.map((r) => r.code).sort().join(","),
+    [publicRooms]
+  );
+
+  const publicRoomsRef = useRef(publicRooms);
+  publicRoomsRef.current = publicRooms;
+
+  useEffect(() => {
+    if (publicRooms.length === 0) {
+      setPresenceCountByCode({});
+      return;
+    }
+    const db = firestoreDb();
+    let cancelled = false;
+    const load = async () => {
+      const rooms = publicRoomsRef.current;
+      if (rooms.length === 0) return;
+      try {
+        const entries = await Promise.all(
+          rooms.map(async (r) => {
+            const cq = query(collection(db, "rooms", r.code, "presence"));
+            const snap = await getCountFromServer(cq);
+            return [r.code, snap.data().count] as const;
+          })
+        );
+        if (!cancelled) {
+          setPresenceCountByCode(Object.fromEntries(entries));
+        }
+      } catch {
+        if (!cancelled) setPresenceCountByCode({});
+      }
+    };
+    void load();
+    const id = window.setInterval(load, 12_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [publicRoomCodesKey, publicRooms.length]);
 
   const normalizedJoin = useMemo(
     () => normalizeRoomCode(joinCode),
@@ -110,6 +194,11 @@ export function RoomsLobby() {
       setCreateError("ルーム名は 1〜40 文字で入力してください");
       return;
     }
+    const playerV = validateDisplayName(createPlayerName);
+    if (!playerV.ok) {
+      setCreateError(playerV.error);
+      return;
+    }
     setCreateBusy(true);
     try {
       await ensureAnonymousSession();
@@ -119,6 +208,8 @@ export function RoomsLobby() {
         setCreateError("ログインに失敗しました");
         return;
       }
+      // 匿名セッションをルール評価まで確実に反映させる
+      await auth.currentUser.getIdToken();
       const db = firestoreDb();
       let code = "";
       for (let attempt = 0; attempt < 12; attempt++) {
@@ -129,6 +220,8 @@ export function RoomsLobby() {
           const pw = createPassword.trim();
           const passwordHash =
             pw.length > 0 ? await sha256HexUtf8(`${code}|${pw}`) : "";
+          // 同一の serverTimestamp を使う（複数 sentinel を別々に request.time と照合するとルールが拒否することがある）
+          const ts = serverTimestamp();
           const payload: Record<string, unknown> = {
             code,
             name,
@@ -136,11 +229,15 @@ export function RoomsLobby() {
             isPublic: createPublic,
             maxHandsLimited,
             moveTimeoutSec: ROOM_MOVE_TIMEOUT_SEC_DEFAULT,
+            maxPlayers: ROOM_MAX_PLAYERS_DEFAULT,
             passwordHash,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
+            matchStarted: false,
+            lastActivityAt: ts,
+            createdAt: ts,
+            updatedAt: ts,
           };
           await setDoc(ref, payload);
+          writeStoredPlayerName(playerV.name);
           router.push(`/?room=${encodeURIComponent(code)}`);
           return;
         }
@@ -153,6 +250,7 @@ export function RoomsLobby() {
     }
   }, [
     createName,
+    createPlayerName,
     createPassword,
     createPublic,
     maxHandsLimited,
@@ -166,6 +264,12 @@ export function RoomsLobby() {
       setJoinError("5桁の部屋番号を入力してください（例: XJ79L）");
       return;
     }
+    const playerV = validateDisplayName(joinPlayerName);
+    if (!playerV.ok) {
+      setJoinError(playerV.error);
+      return;
+    }
+    writeStoredPlayerName(playerV.name);
     setJoinBusy(true);
     try {
       await ensureAnonymousSession();
@@ -196,11 +300,69 @@ export function RoomsLobby() {
     } finally {
       setJoinBusy(false);
     }
-  }, [normalizedJoin, joinPassword, router]);
+  }, [normalizedJoin, joinPlayerName, joinPassword, router]);
+
+  const deletePublicRoomAsAdmin = useCallback(
+    async (code: string) => {
+      if (!isAdminUid(viewerUid)) return;
+      if (
+        !window.confirm(
+          `公開ルーム「${code}」を削除しますか？（presence も削除されます）`
+        )
+      ) {
+        return;
+      }
+      setAdminDeleteCode(code);
+      try {
+        await ensureAnonymousSession();
+        await dissolveRoomClient(firestoreDb(), code);
+      } catch (e: unknown) {
+        window.alert(e instanceof Error ? e.message : String(e));
+      } finally {
+        setAdminDeleteCode(null);
+      }
+    },
+    [viewerUid]
+  );
+
+  const dissolveRoomAsHost = useCallback(
+    async (code: string) => {
+      if (
+        !window.confirm(
+          `ルーム「${code}」を解散しますか？（全員がこの部屋から外れます）`
+        )
+      ) {
+        return;
+      }
+      setAdminDeleteCode(code);
+      try {
+        await ensureAnonymousSession();
+        await dissolveRoomClient(firestoreDb(), code);
+      } catch (e: unknown) {
+        window.alert(e instanceof Error ? e.message : String(e));
+      } finally {
+        setAdminDeleteCode(null);
+      }
+    },
+    []
+  );
 
   const enterFromList = useCallback(
     async (code: string, needsPassword: boolean) => {
       setJoinError(null);
+      const playerV = validateDisplayName(readStoredPlayerName());
+      if (!playerV.ok) {
+        setCreateModalOpen(false);
+        setJoinCode(code);
+        setJoinPlayerName(readStoredPlayerName());
+        setJoinError(
+          needsPassword
+            ? "パスワードと、あなたの表示名（2〜12文字）を入力してください"
+            : "入室するには「あなたの表示名」（2〜12文字）を入力してください"
+        );
+        setJoinModalOpen(true);
+        return;
+      }
       if (needsPassword) {
         setCreateModalOpen(false);
         setJoinCode(code);
@@ -227,6 +389,17 @@ export function RoomsLobby() {
           onChange={(e) => setCreateName(e.target.value)}
           maxLength={40}
           placeholder="自由に決められます"
+          className="mt-1 w-full rounded-xl border border-[#ece5d8]/20 bg-[#0a0f1e] px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/35 focus:border-emerald-400/40"
+        />
+      </label>
+      <label className="block text-xs font-medium text-[#ece5d8]/75">
+        あなたの表示名（2〜12 文字・ルーム内で共有）
+        <input
+          value={createPlayerName}
+          onChange={(e) => setCreatePlayerName(e.target.value)}
+          maxLength={12}
+          autoComplete="nickname"
+          placeholder="例: 旅人"
           className="mt-1 w-full rounded-xl border border-[#ece5d8]/20 bg-[#0a0f1e] px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/35 focus:border-emerald-400/40"
         />
       </label>
@@ -296,6 +469,17 @@ export function RoomsLobby() {
 
   const joinForm = (
     <div className="space-y-3">
+      <label className="block text-xs font-medium text-[#ece5d8]/75">
+        あなたの表示名（2〜12 文字）
+        <input
+          value={joinPlayerName}
+          onChange={(e) => setJoinPlayerName(e.target.value)}
+          maxLength={12}
+          autoComplete="nickname"
+          placeholder="例: 旅人"
+          className="mt-1 w-full rounded-xl border border-[#ece5d8]/20 bg-[#0a0f1e] px-3 py-2.5 text-sm text-white outline-none placeholder:text-white/35 focus:border-sky-400/40"
+        />
+      </label>
       <label className="block text-xs font-medium text-[#ece5d8]/75">
         5桁の部屋番号
         <input
@@ -384,39 +568,75 @@ export function RoomsLobby() {
           <h2 className="text-lg font-semibold text-[#ece5d8]">
             公開ルーム一覧
           </h2>
+          <p className="mt-1 text-xs leading-relaxed text-white/45">
+            自分がホストの公開ルームは、入室の横の「解散」でいつでも閉じられます（ゲーム画面と同じ）。
+          </p>
           {publicRooms.length === 0 ? (
             <p className="mt-3 text-sm text-white/45">
               公開中のルームはまだありません。
             </p>
           ) : (
             <ul className="mt-3 space-y-2">
-              {publicRooms.map((r) => (
-                <li
-                  key={r.code}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#ece5d8]/10 bg-[#0a0f1e]/80 px-3 py-2.5"
-                >
-                  <div>
-                    <p className="font-medium text-[#ece5d8]">{r.name}</p>
-                    <p className="font-mono text-xs tabular-nums text-white/50">
-                      {r.code}{" "}
-                      {r.passwordHash ? (
-                        <span className="text-amber-200/80">🔒</span>
-                      ) : null}
-                      {" · "}
-                      {r.maxHandsLimited ? "7手" : "♾️"}
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void enterFromList(r.code, Boolean(r.passwordHash))
-                    }
-                    className="shrink-0 rounded-lg border border-[#ece5d8]/25 px-3 py-1.5 text-xs font-medium text-[#ece5d8] transition hover:border-[#ece5d8]/45"
+              {publicRooms.map((r) => {
+                const cap =
+                  typeof r.maxPlayers === "number" &&
+                  r.maxPlayers >= 2 &&
+                  r.maxPlayers <= 99
+                    ? r.maxPlayers
+                    : ROOM_MAX_PLAYERS_DEFAULT;
+                const n = presenceCountByCode[r.code];
+                return (
+                  <li
+                    key={r.code}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[#ece5d8]/10 bg-[#0a0f1e]/80 px-3 py-2.5"
                   >
-                    入室
-                  </button>
-                </li>
-              ))}
+                    <div>
+                      <p className="font-medium text-[#ece5d8]">{r.name}</p>
+                      <p className="font-mono text-xs tabular-nums text-white/50">
+                        {r.code}{" "}
+                        {r.passwordHash ? (
+                          <span className="text-amber-200/80">🔒</span>
+                        ) : null}
+                        {" · "}
+                        {typeof n === "number" ? `${n}/${cap}` : "—/—"} 参加者
+                        {" · "}
+                        {r.maxHandsLimited ? "7手" : "♾️"}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          void enterFromList(r.code, Boolean(r.passwordHash))
+                        }
+                        className="rounded-lg border border-[#ece5d8]/25 px-3 py-1.5 text-xs font-medium text-[#ece5d8] transition hover:border-[#ece5d8]/45"
+                      >
+                        入室
+                      </button>
+                      {viewerUid && r.hostUid === viewerUid ? (
+                        <button
+                          type="button"
+                          disabled={adminDeleteCode === r.code}
+                          onClick={() => void dissolveRoomAsHost(r.code)}
+                          className="rounded-lg border border-orange-500/45 bg-orange-950/35 px-2.5 py-1.5 text-xs font-medium text-orange-100 transition hover:border-orange-400/55 disabled:opacity-50"
+                        >
+                          {adminDeleteCode === r.code ? "解散中…" : "解散"}
+                        </button>
+                      ) : null}
+                      {isAdminUid(viewerUid) ? (
+                        <button
+                          type="button"
+                          disabled={adminDeleteCode === r.code}
+                          onClick={() => void deletePublicRoomAsAdmin(r.code)}
+                          className="rounded-lg border border-rose-500/45 bg-rose-950/35 px-2.5 py-1.5 text-xs font-medium text-rose-100 transition hover:border-rose-400/55 disabled:opacity-50"
+                        >
+                          {adminDeleteCode === r.code ? "削除中…" : "削除"}
+                        </button>
+                      ) : null}
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>

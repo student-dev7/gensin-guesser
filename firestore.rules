@@ -10,6 +10,23 @@ service cloud.firestore {
         && request.auth.uid == 'WVvphz6TOZSKuwck6Kf83vAFupo2';
     }
 
+    /** ルームの活動更新のみ（lastActivityAt / updatedAt）か（List に hasOnly が無い環境対策で size + hasAll） */
+    function isRoomActivityPing() {
+      let c = request.resource.data.diff(resource.data).changedKeys();
+      return c.size() == 2 && c.hasAll(['lastActivityAt', 'updatedAt']);
+    }
+
+    function presenceDisplayNameOk() {
+      return request.resource.data.displayName is string
+        && request.resource.data.displayName.size() >= 2
+        && request.resource.data.displayName.size() <= 48;
+    }
+
+    function roomMaxPlayersUnchanged() {
+      return !resource.data.keys().hasAny(['maxPlayers'])
+        || request.resource.data.maxPlayers == resource.data.maxPlayers;
+    }
+
     match /users/{userId} {
       allow read: if true;
       // write だと delete も許可されるため create/update のみ
@@ -39,6 +56,8 @@ service cloud.firestore {
     // ロビーチャット（匿名 UID で送受信）
     // hasOnly だとフィールド追加のたびにルール更新が必要。hasAll なら必須キーだけ揃えばよく、任意フィールドを後から足しやすい
     // 対戦ルーム（5桁コードがドキュメント ID）
+    // 注意: rules の string.size() は UTF-8 バイト数。アプリの maxLength=40（文字）と揃えるなら
+    // 日本語想定で余裕を持たせる（40×4=160 程度が上限目安、200 でガード）
     match /rooms/{roomId} {
       allow read: if true;
       allow create: if request.auth != null
@@ -47,22 +66,55 @@ service cloud.firestore {
         && request.resource.data.code == roomId
         && request.resource.data.name is string
         && request.resource.data.name.size() >= 1
-        && request.resource.data.name.size() <= 40
+        && request.resource.data.name.size() <= 200
         && request.resource.data.isPublic is bool
         && request.resource.data.maxHandsLimited is bool
-        && request.resource.data.moveTimeoutSec is int
+        // Firestore は数値を double として保持することがあり、is int で落ちるのを避ける
         && request.resource.data.moveTimeoutSec == 30
+        && request.resource.data.maxPlayers >= 2
+        && request.resource.data.maxPlayers <= 16
         && request.resource.data.passwordHash is string
         && request.resource.data.passwordHash.size() <= 64
+        && request.resource.data.matchStarted == false
+        // serverTimestamp() — 複数フィールドを別々に request.time と比べると環境によって落ちることがあるため、
+        // createdAt をアンカーにし lastActivityAt / updatedAt は同一時刻であることだけを要求する
         && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time;
+        && request.resource.data.lastActivityAt == request.resource.data.createdAt
+        && request.resource.data.updatedAt == request.resource.data.createdAt;
       allow update: if request.auth != null
-        && resource.data.hostUid == request.auth.uid
         && request.resource.data.hostUid == resource.data.hostUid
         && request.resource.data.code == resource.data.code
-        && request.resource.data.passwordHash == resource.data.passwordHash;
+        && request.resource.data.passwordHash == resource.data.passwordHash
+        && (!(resource.data.keys().hasAny(['matchStarted']) && resource.data.matchStarted == true)
+            || request.resource.data.matchStarted == true)
+        && (
+          isRoomActivityPing()
+          || (resource.data.hostUid == request.auth.uid && roomMaxPlayersUnchanged())
+        );
       allow delete: if request.auth != null
-        && resource.data.hostUid == request.auth.uid;
+        && (
+          resource.data.hostUid == request.auth.uid
+          || (resource.data.isPublic == true && isChatModerator())
+        );
+
+      match /presence/{playerId} {
+        allow read: if true;
+        allow create: if request.auth != null && request.auth.uid == playerId
+          && presenceDisplayNameOk()
+          && request.resource.data.keys().hasAll(['displayName', 'joinedAt'])
+          && request.resource.data.joinedAt == request.time;
+        allow update: if request.auth != null && request.auth.uid == playerId
+          && presenceDisplayNameOk()
+          && request.resource.data.joinedAt == resource.data.joinedAt;
+        allow delete: if request.auth != null && (
+          request.auth.uid == playerId
+          || get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid
+          || (
+            isChatModerator()
+            && get(/databases/$(database)/documents/rooms/$(roomId)).data.isPublic == true
+          )
+        );
+      }
     }
 
     match /chat_messages/{msgId} {
