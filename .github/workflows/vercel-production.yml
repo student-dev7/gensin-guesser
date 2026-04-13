@@ -5,6 +5,11 @@
 # どちらか一方にする（例: このワークフローのみ使うなら Vercel 側の自動デプロイをオフ）
 name: Deploy to Vercel (Production)
 
+# checkout / setup-node 等の Action 実行環境を Node 24 に（Node 20 ランナー廃止前の推奨）
+# https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   push:
     branches: [main]
@@ -29,7 +34,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: npm
 
       - name: Install dependencies
