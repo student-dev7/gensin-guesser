@@ -36,6 +36,7 @@ export function MyRankStatus(props: Props) {
     <section className="flex shrink-0 flex-col items-center" aria-label="マイランク">
       <Link
         href="/rank"
+        prefetch={false}
         className="group flex shrink-0 flex-col items-center gap-1 rounded-xl border border-transparent bg-transparent py-0.5 outline-none transition hover:border-[#ece5d8]/20 focus-visible:ring-2 focus-visible:ring-[#ece5d8]/40"
         aria-label={
           loading

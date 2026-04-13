@@ -533,6 +533,7 @@ export function RoomsLobby() {
         <div className="flex justify-start">
           <Link
             href="/"
+            prefetch={false}
             className="text-sm font-medium text-[#ece5d8]/85 underline-offset-4 transition hover:text-[#ece5d8] hover:underline"
           >
             ← トップに戻る

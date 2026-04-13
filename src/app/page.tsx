@@ -1093,6 +1093,7 @@ function Home() {
 
           <Link
             href="/shop"
+            prefetch={false}
             className="inline-flex shrink-0 items-center justify-center rounded-full border border-amber-500/35 bg-[#12182a]/95 px-2.5 py-1.5 text-xs font-medium text-amber-100/90 shadow-sm backdrop-blur-sm transition hover:border-amber-400/55 sm:px-3 sm:py-2 sm:text-sm"
           >
             ショップ
@@ -1105,6 +1106,7 @@ function Home() {
 
           <Link
             href="/ranking"
+            prefetch={false}
             className="inline-flex shrink-0 items-center justify-center rounded-full border border-[#ece5d8]/25 bg-[#12182a]/95 px-2.5 py-1.5 text-xs font-medium text-[#ece5d8] shadow-sm backdrop-blur-sm transition hover:border-[#ece5d8]/45 sm:px-3 sm:py-2 sm:text-sm"
           >
             ランキング
@@ -1135,6 +1137,7 @@ function Home() {
                 」のルームが見つかりません。
                 <Link
                   href="/rooms"
+                  prefetch={false}
                   className="ml-1 font-medium text-sky-300 underline-offset-2 hover:underline"
                 >
                   ルーム一覧へ
@@ -1402,6 +1405,7 @@ function Home() {
             <div className="mt-4">
               <Link
                 href="/rooms"
+                prefetch={false}
                 className="flex w-full items-center justify-center rounded-xl border border-sky-500/35 bg-[#0d1324]/85 px-3 py-2.5 text-center text-sm font-semibold text-sky-100/95 shadow-sm transition hover:border-sky-400/55 hover:bg-sky-950/25 sm:px-4 sm:py-3"
               >
                 リアルタイム対戦
@@ -1666,6 +1670,7 @@ function Home() {
               <div className="mt-6 flex justify-end gap-2">
                 <Link
                   href="/rooms"
+                  prefetch={false}
                   className="rounded-xl px-4 py-2 text-sm text-white/70 transition hover:bg-white/10"
                 >
                   戻る

@@ -292,6 +292,7 @@ export function AdminModeProvider({
                       ) : null}
                       <Link
                         href="/ranking"
+                        prefetch={false}
                         className="rounded border border-amber-400/40 px-2 py-0.5 text-[11px] hover:bg-amber-500/20"
                       >
                         ランキング

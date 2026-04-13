@@ -92,6 +92,7 @@ export function ShopClient() {
           <div className="mt-8">
             <Link
               href="/"
+              prefetch={false}
               className="inline-flex items-center justify-center rounded-full border border-[#ece5d8]/35 bg-[#12182a] px-6 py-2.5 text-sm font-medium text-[#ece5d8] shadow-[0_0_24px_-8px_rgba(236,229,216,0.25)] transition hover:border-[#ece5d8]/55 hover:bg-[#1a2238]"
             >
               ← トップへ戻る

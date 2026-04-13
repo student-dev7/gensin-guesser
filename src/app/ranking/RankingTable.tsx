@@ -109,6 +109,7 @@ export function RankingTable({ rows, error }: Props) {
           <div className="mt-8 flex flex-row flex-wrap items-center justify-center gap-x-2 gap-y-2.5 sm:gap-x-3 sm:gap-y-3">
             <Link
               href="/"
+              prefetch={false}
               className="inline-flex shrink-0 items-center justify-center rounded-full border border-[#ece5d8]/35 bg-[#12182a] px-4 py-2 text-xs font-medium text-[#ece5d8] shadow-[0_0_24px_-8px_rgba(236,229,216,0.25)] transition hover:border-[#ece5d8]/55 hover:bg-[#1a2238] sm:px-6 sm:py-2.5 sm:text-sm"
             >
               ← トップへ戻る
