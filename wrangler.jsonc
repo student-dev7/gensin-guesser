@@ -27,5 +27,9 @@
 		// Enable image optimization
 		// see https://opennext.js.org/cloudflare/howtos/image
 		"binding": "IMAGES"
+	},
+	// ダッシュボードの Logs / デプロイ設定と一致させ、500 調査用にログを残す
+	"observability": {
+		"enabled": true
 	}
 }
