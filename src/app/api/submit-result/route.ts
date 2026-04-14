@@ -92,6 +92,13 @@ async function resolveGhostHandCount(
 
 export async function POST(req: Request) {
   const body = (await req.json()) as SubmitBody;
+
+  console.log("[DEBUG-1] submit-result body:", {
+    idToken_exists: !!body?.idToken,
+    characterName: body?.characterName,
+    won: body?.won,
+  });
+
   const {
     idToken,
     won,
@@ -218,6 +225,15 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
+
+  console.log("[DEBUG-2] Env check:", {
+    projectId: !!process.env.FIREBASE_PROJECT_ID,
+    clientEmail: !!process.env.FIREBASE_CLIENT_EMAIL,
+    privateKey: process.env.FIREBASE_PRIVATE_KEY ? "EXISTS" : "UNDEFINED",
+    serviceAccountJson: process.env.FIREBASE_SERVICE_ACCOUNT_JSON
+      ? "EXISTS"
+      : "UNDEFINED",
+  });
 
   const uid = await getUidFromIdToken(idToken);
   if (!uid) {
