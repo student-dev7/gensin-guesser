@@ -1,0 +1,8 @@
+# CLI アップロードから除外（100MB 制限対策。依存は Vercel 上で npm ci する）
+node_modules
+.next
+.open-next
+.wrangler
+coverage
+.turbo
+*.tsbuildinfo
