@@ -38,8 +38,13 @@ import {
 } from "@/lib/seasonLeaderboard";
 import { getGrpcStatusCodeDeep } from "@/lib/grpcFirestoreErrors";
 
-/** Vercel / サーバーレスで Firestore トランザクションに余裕を持たせる（プランにより上限あり） */
+/**
+ * Vercel の関数上限。`SUBMIT_INTERNAL_TIMEOUT_MS` より長くし、先に JSON で返せる余地を残す。
+ */
 export const maxDuration = 60;
+
+/** プラットフォームが HTML タイムアウトを返す前に、こちらで JSON エラーを返す（ms） */
+const SUBMIT_INTERNAL_TIMEOUT_MS = 50_000;
 
 type SubmitBody = {
   idToken: string;
@@ -105,6 +110,9 @@ function logSubmitResultCaughtError(e: unknown): void {
 }
 
 function messageFromSubmitResultError(e: unknown): string {
+  if (e instanceof Error && e.message === "__SUBMIT_INTERNAL_TIMEOUT__") {
+    return "サーバーがタイムアウトしました。しばらくしてからもう一度お試しください。";
+  }
   if (e instanceof Error && e.message === "undefined undefined: undefined") {
     return "通信が中断されました。もう一度お試しください。";
   }
@@ -322,6 +330,8 @@ export async function POST(req: Request) {
   )}`;
 
   try {
+    const result = await Promise.race([
+      (async () => {
     const ghostHc = personalMode
       ? undefined
       : await resolveGhostHandCount(
@@ -369,7 +379,7 @@ export async function POST(req: Request) {
       shouldIncrementCharacterStats,
     };
 
-    const result = adminDb
+    return adminDb
       ? await executeSubmitWithAdmin(adminDb, submitParams)
       : await withUserFirestore(idToken, async (db) => {
       const userRef = doc(db, "users", uid);
@@ -642,13 +652,26 @@ export async function POST(req: Request) {
       });
     });
 
+      })(),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error("__SUBMIT_INTERNAL_TIMEOUT__")),
+          SUBMIT_INTERNAL_TIMEOUT_MS
+        )
+      ),
+    ]);
+
     return NextResponse.json(result);
   } catch (e: unknown) {
     logSubmitResultCaughtError(e);
     const message = messageFromSubmitResultError(e);
+    const status =
+      e instanceof Error && e.message === "__SUBMIT_INTERNAL_TIMEOUT__"
+        ? 504
+        : 500;
     return NextResponse.json(
       { ok: false, error: message },
-      { status: 500 }
+      { status }
     );
   }
 }

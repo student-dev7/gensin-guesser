@@ -38,6 +38,7 @@ import {
 import { DEBUG_USER_UPDATED_EVENT } from "../lib/debugUserEvents";
 import { useAdminMode } from "@/components/AdminModeProvider";
 import { isAdminUid } from "../lib/adminUids";
+import { parseApiJsonResponse } from "../lib/parseApiJsonResponse";
 import { validateDisplayName } from "../lib/validateDisplayName";
 import {
   normalizeRoomCode,
@@ -925,7 +926,7 @@ function Home() {
           }),
         });
 
-        const json = (await res.json()) as {
+        const json = await parseApiJsonResponse<{
           ok?: boolean;
           error?: string;
           alreadySubmitted?: boolean;
@@ -938,7 +939,7 @@ function Home() {
           seasonTierPromoted?: boolean;
           promotedToRankLabel?: string;
           ratingDoubledApplied?: boolean;
-        };
+        }>(res);
 
         if (cancelled) return;
 
