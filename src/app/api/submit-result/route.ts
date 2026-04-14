@@ -66,6 +66,64 @@ const DEFAULT_MAX_GUESS_CAP = 7;
 const GHOST_RUN_HAND_CAP = 7;
 const MIN_GUESSES_TO_RESIGN = 4;
 
+/** gRPC / Firestore の Error は message が壊れていることがあるため列挙でログする */
+function logSubmitResultCaughtError(e: unknown): void {
+  if (!(e instanceof Error)) {
+    console.error("[submit-result] non-Error:", e);
+    return;
+  }
+  const err = e as Error & {
+    code?: unknown;
+    details?: unknown;
+    status?: unknown;
+    statusCode?: unknown;
+  };
+  console.error("[submit-result] Firestore/gRPC error:", {
+    name: err.name,
+    message: err.message,
+    code: err.code,
+    details: err.details,
+    status: err.status ?? err.statusCode,
+    stack: err.stack?.split("\n").slice(0, 10).join("\n"),
+  });
+  for (const k of Object.getOwnPropertyNames(e)) {
+    if (k === "name" || k === "message" || k === "stack") continue;
+    try {
+      const v = (e as unknown as Record<string, unknown>)[k];
+      if (typeof v === "function") continue;
+      console.error(`[submit-result] error.${k}:`, v);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+function messageFromSubmitResultError(e: unknown): string {
+  if (e instanceof Error) {
+    const any = e as Error & { code?: number | string };
+    const codeNum =
+      typeof any.code === "number"
+        ? any.code
+        : typeof any.code === "string"
+          ? Number.parseInt(any.code, 10)
+          : NaN;
+    if (codeNum === 7) {
+      return "Firestore に書き込めません（サービスアカウントの権限、またはプロジェクト ID の不一致を確認してください）";
+    }
+    if (codeNum === 5) {
+      return "Firestore のデータが見つかりません（プロジェクト ID を確認してください）";
+    }
+    if (
+      typeof any.message === "string" &&
+      any.message.length > 0 &&
+      any.message !== "undefined undefined: undefined"
+    ) {
+      return any.message;
+    }
+  }
+  return "サーバーで結果の保存に失敗しました";
+}
+
 async function resolveGhostHandCount(
   characterName: string,
   ghostRunId: string | undefined
@@ -92,12 +150,6 @@ async function resolveGhostHandCount(
 
 export async function POST(req: Request) {
   const body = (await req.json()) as SubmitBody;
-
-  console.log("[DEBUG-1] submit-result body:", {
-    idToken_exists: !!body?.idToken,
-    characterName: body?.characterName,
-    won: body?.won,
-  });
 
   const {
     idToken,
@@ -225,15 +277,6 @@ export async function POST(req: Request) {
       { status: 400 }
     );
   }
-
-  console.log("[DEBUG-2] Env check:", {
-    projectId: !!process.env.FIREBASE_PROJECT_ID,
-    clientEmail: !!process.env.FIREBASE_CLIENT_EMAIL,
-    privateKey: process.env.FIREBASE_PRIVATE_KEY ? "EXISTS" : "UNDEFINED",
-    serviceAccountJson: process.env.FIREBASE_SERVICE_ACCOUNT_JSON
-      ? "EXISTS"
-      : "UNDEFINED",
-  });
 
   const uid = await getUidFromIdToken(idToken);
   if (!uid) {
@@ -582,8 +625,8 @@ export async function POST(req: Request) {
 
     return NextResponse.json(result);
   } catch (e: unknown) {
-    console.error("[submit-result]", e);
-    const message = e instanceof Error ? e.message : String(e);
+    logSubmitResultCaughtError(e);
+    const message = messageFromSubmitResultError(e);
     return NextResponse.json(
       { ok: false, error: message },
       { status: 500 }
