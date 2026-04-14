@@ -36,6 +36,10 @@ import {
   effectiveSeasonRateFromUserData,
   USER_FIELD_LEADERBOARD_RATING,
 } from "@/lib/seasonLeaderboard";
+import { getGrpcStatusCodeDeep } from "@/lib/grpcFirestoreErrors";
+
+/** Vercel / サーバーレスで Firestore トランザクションに余裕を持たせる（プランにより上限あり） */
+export const maxDuration = 60;
 
 type SubmitBody = {
   idToken: string;
@@ -72,6 +76,7 @@ function logSubmitResultCaughtError(e: unknown): void {
     console.error("[submit-result] non-Error:", e);
     return;
   }
+  const inferred = getGrpcStatusCodeDeep(e);
   const err = e as Error & {
     code?: unknown;
     details?: unknown;
@@ -82,6 +87,7 @@ function logSubmitResultCaughtError(e: unknown): void {
     name: err.name,
     message: err.message,
     code: err.code,
+    inferredGrpcStatusCode: inferred,
     details: err.details,
     status: err.status ?? err.statusCode,
     stack: err.stack?.split("\n").slice(0, 10).join("\n"),
@@ -99,19 +105,32 @@ function logSubmitResultCaughtError(e: unknown): void {
 }
 
 function messageFromSubmitResultError(e: unknown): string {
+  if (e instanceof Error && e.message === "undefined undefined: undefined") {
+    return "通信が中断されました。もう一度お試しください。";
+  }
   if (e instanceof Error) {
     const any = e as Error & { code?: number | string };
     const codeNum =
-      typeof any.code === "number"
+      getGrpcStatusCodeDeep(e) ??
+      (typeof any.code === "number"
         ? any.code
         : typeof any.code === "string"
           ? Number.parseInt(any.code, 10)
-          : NaN;
+          : NaN);
     if (codeNum === 7) {
       return "Firestore に書き込めません（サービスアカウントの権限、またはプロジェクト ID の不一致を確認してください）";
     }
     if (codeNum === 5) {
       return "Firestore のデータが見つかりません（プロジェクト ID を確認してください）";
+    }
+    if (codeNum === 1) {
+      return "通信が中断されました。もう一度お試しください。";
+    }
+    if (codeNum === 4 || codeNum === 14) {
+      return "サーバーが混み合っています。しばらくしてからもう一度お試しください。";
+    }
+    if (codeNum === 10) {
+      return "保存が競合しました。もう一度お試しください。";
     }
     if (
       typeof any.message === "string" &&

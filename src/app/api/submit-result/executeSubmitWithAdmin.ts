@@ -25,6 +25,7 @@ import {
   effectiveSeasonRateFromUserData,
   USER_FIELD_LEADERBOARD_RATING,
 } from "@/lib/seasonLeaderboard";
+import { withFirestoreWriteRetry } from "@/lib/grpcFirestoreErrors";
 
 export type SubmitTransactionResult = {
   ok: true;
@@ -77,7 +78,8 @@ export async function executeSubmitWithAdmin(
     .collection("character_stats")
     .doc(characterStatsDocId(p.characterName));
 
-  return db.runTransaction(async (tx: Transaction) => {
+  return withFirestoreWriteRetry(() =>
+    db.runTransaction(async (tx: Transaction) => {
     const existingRun = await tx.get(runRef);
     if (existingRun.exists) {
       const userSnapDup = await tx.get(userRef);
@@ -330,5 +332,6 @@ export async function executeSubmitWithAdmin(
       promotedToRankLabel,
       ratingDoubledApplied,
     };
-  });
+  })
+  );
 }
