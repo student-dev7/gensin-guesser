@@ -1,9 +1,0 @@
-{
-	"$schema": "node_modules/wrangler/config-schema.json",
-	// 本番 genshin-guesser を上書きしないよう別名
-	"name": "genshin-guesser-smoke",
-	"main": "scripts/cloudflare-smoke-worker.mjs",
-	"workers_dev": true,
-	"preview_urls": true,
-	"compatibility_date": "2026-04-13"
-}

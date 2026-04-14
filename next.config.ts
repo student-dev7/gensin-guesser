@@ -1,5 +1,4 @@
 import type { NextConfig } from "next";
-import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 
 const nextConfig: NextConfig = {
   // クライアントで Vercel 判定（VERCEL はブラウザに渡らないため NEXT_PUBLIC に載せる）
@@ -12,5 +11,3 @@ const nextConfig: NextConfig = {
 };
 
 export default nextConfig;
-
-initOpenNextCloudflareForDev();

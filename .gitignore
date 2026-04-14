@@ -51,10 +51,11 @@ serviceAccountKey*.json
 # vercel
 .vercel
 
+# 過去の OpenNext / Wrangler のローカル生成物
+.open-next
+.wrangler
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
 
-# OpenNext / Wrangler ローカル
-.open-next
-.wrangler

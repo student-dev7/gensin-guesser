@@ -11,13 +11,7 @@
     "vercel:deploy": "vercel deploy --prebuilt --prod",
     "vercel:deploy:preview": "vercel deploy --prebuilt",
     "deploy:vercel": "vercel build --yes && vercel deploy --prebuilt --prod",
-    "preview": "opennextjs-cloudflare build --noMinify && node scripts/patch-opennext-eval.mjs && opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build --noMinify && node scripts/patch-opennext-eval.mjs && opennextjs-cloudflare deploy",
-    "upload": "opennextjs-cloudflare build --noMinify && node scripts/patch-opennext-eval.mjs && opennextjs-cloudflare upload",
-    "backfill:leaderboard-rating": "node scripts/backfill-leaderboard-rating.mjs",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
-    "dev:smoke": "wrangler dev -c wrangler.smoke.jsonc",
-    "deploy:smoke": "wrangler deploy -c wrangler.smoke.jsonc"
+    "backfill:leaderboard-rating": "node scripts/backfill-leaderboard-rating.mjs"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
@@ -31,7 +25,6 @@
     "@protobufjs/inquire": "npm:@untra/dontinquire@0.1.0"
   },
   "devDependencies": {
-    "@opennextjs/cloudflare": "^1.19.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -40,7 +33,6 @@
     "eslint-config-next": "16.2.3",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vercel": "^51.1.0",
-    "wrangler": "^4.82.2"
+    "vercel": "^51.1.0"
   }
 }
