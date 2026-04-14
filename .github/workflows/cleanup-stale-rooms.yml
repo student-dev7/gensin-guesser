@@ -1,0 +1,34 @@
+# Vercel Hobby はダッシュボードの Cron が 1 日 1 回に制限されがちなため、
+# 同じ掃除 API を定期実行して「試合未開始の放置ルーム」を早めに消す。
+#
+# 必要な Repository secrets:
+#   CLEANUP_SITE_URL  例: https://your-app.vercel.app （末尾スラッシュなし）
+#   CRON_SECRET         Vercel の環境変数 CRON_SECRET と同じ文字列
+#
+name: Cleanup stale rooms
+
+on:
+  schedule:
+    # UTC。約10分ごと（7分放置閾値と相性よし）
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST cleanup
+        env:
+          BASE: ${{ secrets.CLEANUP_SITE_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          set -e
+          if [ -z "$BASE" ] || [ -z "$CRON_SECRET" ]; then
+            echo "Set repository secrets CLEANUP_SITE_URL and CRON_SECRET (see workflow file header)."
+            exit 1
+          fi
+          URL="${BASE%/}/api/cron/cleanup-stale-rooms"
+          echo "Calling cleanup…"
+          curl -sS -f -H "Authorization: Bearer ${CRON_SECRET}" "$URL"
+          echo
+          echo "OK"

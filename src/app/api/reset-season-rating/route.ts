@@ -1,6 +1,7 @@
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { NextResponse } from "next/server";
 import { DEFAULT_INITIAL_RATING } from "@/lib/rating";
+import { USER_FIELD_LEADERBOARD_RATING } from "@/lib/seasonLeaderboard";
 import { getUidFromIdToken } from "@/lib/identityToolkit";
 import { withUserFirestore } from "@/lib/firebaseUserFirestore";
 
@@ -43,6 +44,7 @@ export async function POST(req: Request) {
         {
           current_rate: DEFAULT_INITIAL_RATING,
           rating: DEFAULT_INITIAL_RATING,
+          [USER_FIELD_LEADERBOARD_RATING]: DEFAULT_INITIAL_RATING,
           updatedAt: serverTimestamp(),
         },
         { merge: true }

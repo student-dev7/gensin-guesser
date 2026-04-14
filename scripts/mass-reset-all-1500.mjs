@@ -76,6 +76,8 @@ if (getApps().length === 0) {
   initializeApp({ credential: cert(serviceAccount) });
 }
 
+const LEADERBOARD_RATING_FIELD = "leaderboard_rating";
+
 const db = getFirestore();
 const r = DEFAULT_INITIAL_RATING;
 
@@ -89,6 +91,7 @@ for (const docSnap of snap.docs) {
     {
       current_rate: r,
       rating: r,
+      [LEADERBOARD_RATING_FIELD]: r,
       games: 0,
       updatedAt: FieldValue.serverTimestamp(),
     },

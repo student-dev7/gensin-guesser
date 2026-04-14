@@ -4,6 +4,7 @@ import { getAdminFirestore } from "@/lib/firebaseAdmin";
 import { getUidFromIdToken } from "@/lib/identityToolkit";
 import { isAdminUid } from "@/lib/adminUids";
 import { clampRating, DEFAULT_INITIAL_RATING } from "@/lib/rating";
+import { USER_FIELD_LEADERBOARD_RATING } from "@/lib/seasonLeaderboard";
 
 export const runtime = "nodejs";
 
@@ -78,6 +79,7 @@ export async function POST(req: Request) {
         {
           current_rate: next,
           rating: next,
+          [USER_FIELD_LEADERBOARD_RATING]: next,
           updatedAt: FieldValue.serverTimestamp(),
         },
         { merge: true }

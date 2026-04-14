@@ -9,6 +9,7 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { clampRating, DEFAULT_INITIAL_RATING } from "@/lib/rating";
+import { USER_FIELD_LEADERBOARD_RATING } from "@/lib/seasonLeaderboard";
 import { DEBUG_USER_UPDATED_EVENT } from "@/lib/debugUserEvents";
 import {
   ensureAnonymousSession,
@@ -93,6 +94,7 @@ export function DebugUserTools() {
         {
           current_rate: cr,
           rating: cr,
+          [USER_FIELD_LEADERBOARD_RATING]: cr,
           gold: Math.max(0, g),
           updatedAt: serverTimestamp(),
         },

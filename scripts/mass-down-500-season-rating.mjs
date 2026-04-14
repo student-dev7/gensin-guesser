@@ -56,6 +56,8 @@ function resolveServiceAccountJson() {
   return null;
 }
 
+const LEADERBOARD_RATING_FIELD = "leaderboard_rating";
+
 const MIN_RATING = 1500;
 const MAX_RATING = 5000;
 const DEFAULT_INITIAL_RATING = 1500;
@@ -109,6 +111,7 @@ for (const docSnap of snap.docs) {
     {
       current_rate: next,
       rating: next,
+      [LEADERBOARD_RATING_FIELD]: next,
       updatedAt: FieldValue.serverTimestamp(),
     },
     { merge: true }

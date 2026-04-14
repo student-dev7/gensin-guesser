@@ -447,7 +447,7 @@ function Home() {
     tick();
     /**
      * 掃除の「最終操作から N 分」より短い間隔で更新し、放置判定と被って誤削除されないようにする。
-     * （ROOM_LOBBY_NO_MATCH_MS 既定 5 分なら 2 分ハートビートで余裕あり）
+     * （ROOM_LOBBY_NO_MATCH_MS 既定 7 分なら 2 分ハートビートで余裕あり）
      */
     const id = window.setInterval(tick, 120_000);
     return () => clearInterval(id);

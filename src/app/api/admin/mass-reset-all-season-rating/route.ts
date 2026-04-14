@@ -4,6 +4,7 @@ import { getAdminFirestore } from "@/lib/firebaseAdmin";
 import { getUidFromIdToken } from "@/lib/identityToolkit";
 import { isAdminUid } from "@/lib/adminUids";
 import { DEFAULT_INITIAL_RATING } from "@/lib/rating";
+import { USER_FIELD_LEADERBOARD_RATING } from "@/lib/seasonLeaderboard";
 
 export const runtime = "nodejs";
 
@@ -67,6 +68,7 @@ export async function POST(req: Request) {
         {
           current_rate: r,
           rating: r,
+          [USER_FIELD_LEADERBOARD_RATING]: r,
           games: 0,
           updatedAt: FieldValue.serverTimestamp(),
         },

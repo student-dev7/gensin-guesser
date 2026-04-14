@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { getPublicFirestore } from "@/lib/firebasePublicFirestore";
-import { fetchSeasonLeaderboard } from "@/lib/seasonLeaderboard";
+import {
+  DEFAULT_LEADERBOARD_TOP_N,
+  fetchSeasonLeaderboard,
+} from "@/lib/seasonLeaderboard";
 import { RankingTable, type RankRow } from "./RankingTable";
 
 export const metadata: Metadata = {
@@ -16,7 +19,7 @@ export const dynamic = "force-dynamic";
 
 async function loadRanking(): Promise<RankRow[]> {
   const db = getPublicFirestore();
-  const rows = await fetchSeasonLeaderboard(db, 50);
+  const rows = await fetchSeasonLeaderboard(db, DEFAULT_LEADERBOARD_TOP_N);
   return rows.map((r) => ({
     uid: r.uid,
     rank: r.rank,

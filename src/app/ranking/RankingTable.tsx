@@ -7,6 +7,7 @@ import { RankingAvatar } from "@/components/RankingAvatar";
 import { RankLogoMark } from "@/components/RankLogoMark";
 import { isAdminUid } from "@/lib/adminUids";
 import { MAX_RATING } from "@/lib/rating";
+import { DEFAULT_LEADERBOARD_TOP_N } from "@/lib/seasonLeaderboard";
 import { RANK_BAND_WIDTH_PT } from "@/lib/rankUtils";
 import {
   PatchNotesBattleSection,
@@ -100,7 +101,8 @@ export function RankingTable({ rows, error }: Props) {
             レートランキング
           </h1>
           <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-white/55">
-            Firestore のユーザー別レート上位 50 名です。
+            Firestore のユーザー別レート上位 {DEFAULT_LEADERBOARD_TOP_N}{" "}
+            名です。
           </p>
           <p className="mx-auto mt-2 max-w-md text-xs leading-relaxed text-white/40">
             2 週間に 1 度、全員のシーズンレートが 1 ランク分（500pt）ダウンします。次回実行は4月27日です。自分だけ
@@ -852,7 +854,7 @@ export function RankingTable({ rows, error }: Props) {
           <div className="border-b border-[#ece5d8]/15 bg-gradient-to-r from-[#0f1528] via-[#121a30] to-[#0f1528] px-5 py-4">
             <div className="flex items-center justify-between gap-3">
               <span className="text-sm font-medium tracking-wide text-[#ece5d8]/95">
-                トップ 50
+                トップ {DEFAULT_LEADERBOARD_TOP_N}
               </span>
               <span className="text-xs text-white/40">rating desc</span>
             </div>

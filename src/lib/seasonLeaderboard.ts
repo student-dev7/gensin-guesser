@@ -1,5 +1,21 @@
-import { collection, getDocs, type Firestore } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  type Firestore,
+} from "firebase/firestore";
 import { clampRating, DEFAULT_INITIAL_RATING } from "@/lib/rating";
+
+/** `/ranking` ページと `/api/rankings` の既定の上位件数 */
+export const DEFAULT_LEADERBOARD_TOP_N = 30;
+
+/**
+ * Firestore `users` 上の並び替え用フィールド（実効シーズンレートと同じ数値を書き込む）。
+ * `orderBy(leaderboard_rating).limit(N)` で全件スキャン不要。
+ */
+export const USER_FIELD_LEADERBOARD_RATING = "leaderboard_rating" as const;
 
 /**
  * `rating` / `current_rate` の欠損や食い違いに耐える実効シーズンレート。
@@ -24,38 +40,38 @@ export type SeasonLeaderboardRow = {
   uid: string;
   rank: number;
   displayName: string;
-  /** 表示・並び替え用（rating / current_rate の実効値） */
+  /** 表示・並び替え用（`leaderboard_rating` と一致） */
   rating: number;
   games: number;
   updatedAt?: unknown;
 };
 
 /**
- * `users` を**全件**読み、実効レートでソートして上位 topN を返す。
- *
- * 以前の「rating 上位 N 件」と「current_rate 上位 N 件」をマージする方式では、
- * どちらのクエリでもトップ枠外になるとマージ集合に含まれず消える（2384→1884 でも消える）問題があった。
- * ユーザー数が数千規模までなら全件取得の方が正確（読み取りはユーザー数に比例）。
+ * `leaderboard_rating` 降順で上位 topN 件のみ取得（読み取り ≒ topN）。
+ * 既存ユーザーには一度 `scripts/backfill-leaderboard-rating.mjs` が必要。
  */
 export async function fetchSeasonLeaderboard(
   db: Firestore,
   topN: number
 ): Promise<SeasonLeaderboardRow[]> {
-  const snap = await getDocs(collection(db, "users"));
+  const capped = Math.max(1, Math.min(100, Math.floor(topN)));
+  const q = query(
+    collection(db, "users"),
+    orderBy(USER_FIELD_LEADERBOARD_RATING, "desc"),
+    limit(capped)
+  );
+  const snap = await getDocs(q);
 
-  type Row = {
-    uid: string;
-    score: number;
-    displayName: string;
-    games: number;
-    updatedAt: unknown;
-  };
-
-  const rows: Row[] = [];
+  let rank = 1;
+  const rows: SeasonLeaderboardRow[] = [];
 
   for (const d of snap.docs) {
     const data = d.data() as Record<string, unknown>;
-    const score = effectiveSeasonRateFromUserData(data);
+    const raw = data[USER_FIELD_LEADERBOARD_RATING];
+    const rating =
+      typeof raw === "number" && Number.isFinite(raw)
+        ? clampRating(raw)
+        : effectiveSeasonRateFromUserData(data);
     const games =
       typeof data.games === "number" && Number.isFinite(data.games)
         ? data.games
@@ -66,21 +82,13 @@ export async function fetchSeasonLeaderboard(
         : `GenshinUser_${d.id.slice(0, 8)}`;
     rows.push({
       uid: d.id,
-      score,
+      rank: rank++,
       displayName,
+      rating,
       games,
       updatedAt: data.updatedAt ?? null,
     });
   }
 
-  rows.sort((a, b) => b.score - a.score);
-
-  return rows.slice(0, topN).map((r, i) => ({
-    uid: r.uid,
-    rank: i + 1,
-    displayName: r.displayName,
-    rating: r.score,
-    games: r.games,
-    updatedAt: r.updatedAt,
-  }));
+  return rows;
 }

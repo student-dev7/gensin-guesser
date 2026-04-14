@@ -12,14 +12,14 @@ const STALE_MS =
     : 7 * 24 * 60 * 60 * 1000;
 
 /**
- * 試合未開始のまま「最終活動」からこれ以上経過したルームを削除（デフォルト 5 分）。
+ * 試合未開始のまま「最終活動」からこれ以上経過したルームを削除（デフォルト 7 分）。
  * ホストのハートビートで lastActivityAt が更新されるため、全員退出・ホストが閉じたあとに効く。
  * 変更は ROOM_LOBBY_NO_MATCH_MS（ミリ秒）。
  */
 const LOBBY_NO_MATCH_MS =
   Number(process.env.ROOM_LOBBY_NO_MATCH_MS) > 0
     ? Number(process.env.ROOM_LOBBY_NO_MATCH_MS)
-    : 5 * 60 * 1000;
+    : 7 * 60 * 1000;
 
 function verifyCronAuth(req: Request): boolean {
   const secret = process.env.CRON_SECRET?.trim();
@@ -39,8 +39,9 @@ function verifyCronAuth(req: Request): boolean {
  * 古いルームを削除。
  * Vercel Cron: Authorization: Bearer CRON_SECRET（未設定だと本番では常に 401）
  *
- * 注意: Vercel Hobby は cron が「1 日 1 回まで」。5 分おきのスケジュールは Hobby ではデプロイ不可。
- * 短い間隔で消したい場合は Pro 以上で cron が実際に走る必要がある（Hobby は 1 日 1 回まで）。
+ * 注意: Vercel Hobby はダッシュボードの Cron を「1 日 1 回」に制限されがち。
+ * 短い間隔で掃除したい場合は `.github/workflows/cleanup-stale-rooms.yml`（GitHub Actions）で
+ * 同じ API を叩くか、Pro で Vercel Cron を増やす。
  */
 export async function GET(req: Request) {
   if (!verifyCronAuth(req)) {

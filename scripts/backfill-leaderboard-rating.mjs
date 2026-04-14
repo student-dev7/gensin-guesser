@@ -1,16 +1,20 @@
 /**
- * 全 users のシーズンレートを 6 ティア分（125×6 pt）下げる（1500 固定にはしない）。
- * 要: .env.local の FIREBASE_SERVICE_ACCOUNT_JSON
+ * 全 users に `leaderboard_rating` を埋める（既存の current_rate / rating から実効レートを計算）。
+ * ランキングの orderBy クエリが動くようにする。初回デプロイ後に 1 回実行。
  *
- *   node scripts/mass-down-season-rating.mjs
+ *   npm run backfill:leaderboard-rating
+ *
+ * 要: .env.local の FIREBASE_SERVICE_ACCOUNT_JSON（または KEY_PATH）
  */
 import { readFileSync, existsSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { initializeApp, cert, getApps } from "firebase-admin/app";
-import { getFirestore, FieldValue } from "firebase-admin/firestore";
+import { getFirestore } from "firebase-admin/firestore";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const LEADERBOARD_RATING_FIELD = "leaderboard_rating";
 
 function loadEnvFile(rel) {
   const p = resolve(__dirname, rel);
@@ -56,23 +60,25 @@ function resolveServiceAccountJson() {
   return null;
 }
 
-const LEADERBOARD_RATING_FIELD = "leaderboard_rating";
-
 const MIN_RATING = 1500;
-const MAX_RATING = 5000;
+const MAX_RATING = 100000;
 const DEFAULT_INITIAL_RATING = 1500;
-const RANK_TIER_WIDTH_PT = 125;
-const TIER_STEPS_DOWN = 6;
 
 function clampRating(rating) {
   return Math.max(MIN_RATING, Math.min(MAX_RATING, rating));
 }
 
-function readSeasonFromUserData(data) {
-  const cr = data.current_rate;
-  if (typeof cr === "number" && Number.isFinite(cr)) return clampRating(cr);
+/** seasonLeaderboard.effectiveSeasonRateFromUserData と同じ */
+function effectiveSeasonRateFromUserData(data) {
   const r = data.rating;
-  if (typeof r === "number" && Number.isFinite(r)) return clampRating(r);
+  const cr = data.current_rate;
+  const a =
+    typeof r === "number" && Number.isFinite(r) ? clampRating(r) : null;
+  const b =
+    typeof cr === "number" && Number.isFinite(cr) ? clampRating(cr) : null;
+  if (a != null && b != null) return Math.max(a, b);
+  if (a != null) return a;
+  if (b != null) return b;
   return DEFAULT_INITIAL_RATING;
 }
 
@@ -97,28 +103,24 @@ if (getApps().length === 0) {
 }
 
 const db = getFirestore();
-const delta = TIER_STEPS_DOWN * RANK_TIER_WIDTH_PT;
 
 const snap = await db.collection("users").get();
 let batch = db.batch();
 let batchOps = 0;
+let updated = 0;
 
 for (const docSnap of snap.docs) {
   const data = docSnap.data();
-  const cur = readSeasonFromUserData(data);
-  const next = clampRating(cur - delta);
-
+  const lr = effectiveSeasonRateFromUserData(data);
   batch.set(
     docSnap.ref,
     {
-      current_rate: next,
-      rating: next,
-      [LEADERBOARD_RATING_FIELD]: next,
-      updatedAt: FieldValue.serverTimestamp(),
+      [LEADERBOARD_RATING_FIELD]: lr,
     },
     { merge: true }
   );
   batchOps++;
+  updated++;
 
   if (batchOps >= 500) {
     await batch.commit();
@@ -136,8 +138,8 @@ console.log(
     {
       ok: true,
       userCount: snap.size,
-      deltaPoints: -delta,
-      tierStepsDown: TIER_STEPS_DOWN,
+      documentsUpdated: updated,
+      field: LEADERBOARD_RATING_FIELD,
     },
     null,
     2

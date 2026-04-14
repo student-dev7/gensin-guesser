@@ -30,6 +30,7 @@ import { isAdminUid } from "@/lib/adminUids";
 import { USER_FIELD_NEXT_WIN_RATING_DOUBLE } from "@/lib/shop";
 import { validateDisplayName } from "@/lib/validateDisplayName";
 import { ROOM_UNLIMITED_GUESS_CAP } from "@/lib/roomTypes";
+import { USER_FIELD_LEADERBOARD_RATING } from "@/lib/seasonLeaderboard";
 
 type SubmitBody = {
   idToken: string;
@@ -461,6 +462,7 @@ export async function POST(req: Request) {
             {
               current_rate: newRating,
               rating: newRating,
+              [USER_FIELD_LEADERBOARD_RATING]: newRating,
               games: gamesAfter,
               displayName,
               updatedAt: serverTimestamp(),
