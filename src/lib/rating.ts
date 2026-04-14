@@ -47,6 +47,30 @@ export function clampRating(rating: number) {
   return Math.max(MIN_RATING, Math.min(MAX_RATING, rating));
 }
 
+/**
+ * Firestore / API JSON 由来の1フィールドをシーズンレートに（数値・数字文字列）。
+ */
+export function parseSeasonRateField(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return clampRating(value);
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value.trim());
+    if (Number.isFinite(n)) return clampRating(n);
+  }
+  return null;
+}
+
+/** `/api/submit-result` など JSON の数値フィールド用 */
+export function parseJsonFiniteNumber(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const n = Number(value.trim());
+    if (Number.isFinite(n)) return n;
+  }
+  return fallback;
+}
+
 /** 新規ユーザー・シーズン期間リセット時の基準 */
 export const DEFAULT_INITIAL_RATING = 1500;
 

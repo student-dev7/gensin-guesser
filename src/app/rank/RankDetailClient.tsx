@@ -2,13 +2,15 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { doc, getDoc, getFirestore } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { RankDetailView } from "@/components/RankDetailView";
 import { DEFAULT_INITIAL_RATING } from "@/lib/rating";
+import { effectiveSeasonRateFromUserData } from "@/lib/seasonLeaderboard";
 import { logAnalyticsEvent } from "@/lib/firebaseAnalytics";
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
+  getFirebaseFirestore,
 } from "@/lib/firebaseClient";
 import { rateForRankDisplay } from "@/lib/rankUtils";
 
@@ -34,7 +36,7 @@ export function RankDetailClient() {
           }
           return;
         }
-        const db = getFirestore(auth.app);
+        const db = getFirebaseFirestore();
         const snap = await getDoc(doc(db, "users", uid));
         if (!snap.exists()) {
           if (!cancelled) {
@@ -43,13 +45,9 @@ export function RankDetailClient() {
           }
           return;
         }
-        const d = snap.data();
-        const season =
-          typeof d?.current_rate === "number" && Number.isFinite(d.current_rate)
-            ? d.current_rate
-            : typeof d?.rating === "number" && Number.isFinite(d.rating)
-              ? d.rating
-              : DEFAULT_INITIAL_RATING;
+        const season = effectiveSeasonRateFromUserData(
+          snap.data() as Record<string, unknown>
+        );
         if (!cancelled) {
           setSeasonRating(season);
         }

@@ -11,7 +11,7 @@
     "vercel:deploy": "vercel deploy --prebuilt --prod",
     "vercel:deploy:preview": "vercel deploy --prebuilt",
     "deploy:vercel": "vercel build --yes && vercel deploy --prebuilt --prod",
-    "backfill:leaderboard-rating": "node scripts/backfill-leaderboard-rating.mjs"
+    "backfill:leaderboard-rating": "node --dns-result-order=ipv4first scripts/backfill-leaderboard-rating.mjs"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",

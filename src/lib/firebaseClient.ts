@@ -9,6 +9,8 @@ import {
   signInAnonymously,
   type Auth,
 } from "firebase/auth";
+import type { Firestore } from "firebase/firestore";
+import { getFirestoreForApp } from "./firestoreForApp";
 import { getFirebaseWebConfig } from "./firebaseWebConfig";
 
 let cachedAuth: Auth | null = null;
@@ -62,4 +64,9 @@ export function getFirebaseAuth(): Auth {
     cachedAuth = getAuth(ensureApp());
   }
   return cachedAuth;
+}
+
+/** デフォルトアプリ用 Firestore（長ポーリング自動検出を有効化済み） */
+export function getFirebaseFirestore(): Firestore {
+  return getFirestoreForApp(ensureApp());
 }

@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { doc, getDoc, getFirestore } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { useCallback, useEffect, useState } from "react";
 import { GoldCoinIcon } from "@/components/GoldCoinIcon";
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
+  getFirebaseFirestore,
 } from "@/lib/firebaseClient";
 import { logAnalyticsEvent } from "@/lib/firebaseAnalytics";
 import {
@@ -35,7 +36,7 @@ export function ShopClient() {
         setHasNextWinDouble(false);
         return;
       }
-      const db = getFirestore(auth.app);
+      const db = getFirebaseFirestore();
       const snap = await getDoc(doc(db, "users", uid));
       if (!snap.exists()) {
         setGold(0);

@@ -4,16 +4,19 @@ import { useCallback, useEffect, useState } from "react";
 import {
   doc,
   getDoc,
-  getFirestore,
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
 import { clampRating, DEFAULT_INITIAL_RATING } from "@/lib/rating";
-import { USER_FIELD_LEADERBOARD_RATING } from "@/lib/seasonLeaderboard";
+import {
+  effectiveSeasonRateFromUserData,
+  USER_FIELD_LEADERBOARD_RATING,
+} from "@/lib/seasonLeaderboard";
 import { DEBUG_USER_UPDATED_EVENT } from "@/lib/debugUserEvents";
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
+  getFirebaseFirestore,
 } from "@/lib/firebaseClient";
 import { useAdminMode } from "@/components/AdminModeProvider";
 
@@ -39,22 +42,19 @@ export function DebugUserTools() {
         setError("未ログインです");
         return;
       }
-      const db = getFirestore(auth.app);
+      const db = getFirebaseFirestore();
       const snap = await getDoc(doc(db, "users", uid));
       if (!snap.exists()) {
         setSeasonDraft(String(DEFAULT_INITIAL_RATING));
         setGoldDraft("0");
         return;
       }
-      const d = snap.data();
-      const season =
-        typeof d?.current_rate === "number" && Number.isFinite(d.current_rate)
-          ? d.current_rate
-          : typeof d?.rating === "number" && Number.isFinite(d.rating)
-            ? d.rating
-            : DEFAULT_INITIAL_RATING;
+      const raw = snap.data() as Record<string, unknown>;
+      const season = effectiveSeasonRateFromUserData(raw);
       const g =
-        typeof d?.gold === "number" && Number.isFinite(d.gold) ? d.gold : 0;
+        typeof raw.gold === "number" && Number.isFinite(raw.gold)
+          ? raw.gold
+          : 0;
       setSeasonDraft(String(Math.round(season)));
       setGoldDraft(String(Math.round(g)));
     } catch (e: unknown) {
@@ -88,7 +88,7 @@ export function DebugUserTools() {
         return;
       }
       const cr = clampRating(season);
-      const db = getFirestore(auth.app);
+      const db = getFirebaseFirestore();
       await setDoc(
         doc(db, "users", uid),
         {

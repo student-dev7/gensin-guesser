@@ -104,44 +104,65 @@ if (getApps().length === 0) {
 
 const db = getFirestore();
 
-const snap = await db.collection("users").get();
-let batch = db.batch();
-let batchOps = 0;
-let updated = 0;
+try {
+  const snap = await db.collection("users").get();
+  let batch = db.batch();
+  let batchOps = 0;
+  let updated = 0;
 
-for (const docSnap of snap.docs) {
-  const data = docSnap.data();
-  const lr = effectiveSeasonRateFromUserData(data);
-  batch.set(
-    docSnap.ref,
-    {
-      [LEADERBOARD_RATING_FIELD]: lr,
-    },
-    { merge: true }
-  );
-  batchOps++;
-  updated++;
+  for (const docSnap of snap.docs) {
+    const data = docSnap.data();
+    const lr = effectiveSeasonRateFromUserData(data);
+    batch.set(
+      docSnap.ref,
+      {
+        [LEADERBOARD_RATING_FIELD]: lr,
+      },
+      { merge: true }
+    );
+    batchOps++;
+    updated++;
 
-  if (batchOps >= 500) {
-    await batch.commit();
-    batch = db.batch();
-    batchOps = 0;
+    if (batchOps >= 500) {
+      await batch.commit();
+      batch = db.batch();
+      batchOps = 0;
+    }
   }
-}
 
-if (batchOps > 0) {
-  await batch.commit();
-}
+  if (batchOps > 0) {
+    await batch.commit();
+  }
 
-console.log(
-  JSON.stringify(
-    {
-      ok: true,
-      userCount: snap.size,
-      documentsUpdated: updated,
-      field: LEADERBOARD_RATING_FIELD,
-    },
-    null,
-    2
-  )
-);
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        userCount: snap.size,
+        documentsUpdated: updated,
+        field: LEADERBOARD_RATING_FIELD,
+      },
+      null,
+      2
+    )
+  );
+} catch (e) {
+  const msg = e instanceof Error ? e.message : String(e);
+  console.error("Firestore 処理に失敗しました:", msg);
+  if (
+    msg.includes("undefined undefined") ||
+    msg.includes("Could not reach") ||
+    msg.includes("UNAVAILABLE") ||
+    msg.includes("DEADLINE_EXCEEDED")
+  ) {
+    console.error(`
+よくある原因:
+  • インターネット接続・VPN・企業プロキシ・ファイアウォールで Google (firestore.googleapis.com) に届かない
+  • サービスアカウント JSON が別プロジェクトのもの／破損している
+  • Firebase コンソールで Firestore が未作成・無効
+
+ブラウザのコンソールに同じ文言が出る場合も、上記＋ NEXT_PUBLIC_FIREBASE_* の誤り・オフラインです。
+`);
+  }
+  process.exit(1);
+}

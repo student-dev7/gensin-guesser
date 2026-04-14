@@ -14,7 +14,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  getFirestore,
   limit,
   onSnapshot,
   orderBy,
@@ -26,9 +25,11 @@ import {
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
+  getFirebaseFirestore,
 } from "../lib/firebaseClient";
 import { RankLogoMark } from "./RankLogoMark";
 import { DEFAULT_INITIAL_RATING } from "../lib/rating";
+import { effectiveSeasonRateFromUserData } from "../lib/seasonLeaderboard";
 import {
   formatRankTierLine,
   getRankData,
@@ -146,7 +147,7 @@ export function ChatRoomPanel(props: {
         if (cancelled) return;
         const auth = getFirebaseAuth();
         setMyUid(auth.currentUser?.uid ?? null);
-        const db = getFirestore(auth.app);
+        const db = getFirebaseFirestore();
         const q = query(
           collection(db, CHAT_COLLECTION),
           orderBy("createdAt", "desc"),
@@ -208,29 +209,16 @@ export function ChatRoomPanel(props: {
     void (async () => {
       try {
         const auth = getFirebaseAuth();
-        const db = getFirestore(auth.app);
+        const db = getFirebaseFirestore();
         await Promise.all(
           missing.map(async (uid) => {
             try {
               const snap = await getDoc(doc(db, "users", uid));
-              let season = DEFAULT_INITIAL_RATING;
-              if (snap.exists()) {
-                const d = snap.data() as {
-                  current_rate?: unknown;
-                  rating?: unknown;
-                };
-                if (
-                  typeof d.current_rate === "number" &&
-                  Number.isFinite(d.current_rate)
-                ) {
-                  season = d.current_rate;
-                } else if (
-                  typeof d.rating === "number" &&
-                  Number.isFinite(d.rating)
-                ) {
-                  season = d.rating;
-                }
-              }
+              const season = snap.exists()
+                ? effectiveSeasonRateFromUserData(
+                    snap.data() as Record<string, unknown>
+                  )
+                : DEFAULT_INITIAL_RATING;
               const displayRate = rateForRankDisplay(season);
               rankDisplayRatingRef.current[uid] = displayRate;
               rankLabelRef.current[uid] = formatRankTierLine(
@@ -274,7 +262,7 @@ export function ChatRoomPanel(props: {
         setError("ログインできませんでした");
         return;
       }
-      const db = getFirestore(auth.app);
+      const db = getFirebaseFirestore();
       await addDoc(collection(db, CHAT_COLLECTION), {
         text: raw,
         displayName: displayNameForSend,
@@ -318,7 +306,7 @@ export function ChatRoomPanel(props: {
           setError("削除できませんでした");
           return;
         }
-        const db = getFirestore(auth.app);
+        const db = getFirebaseFirestore();
         await deleteDoc(doc(db, CHAT_COLLECTION, messageId));
         bumpActivity();
       } catch (e) {
@@ -349,7 +337,7 @@ export function ChatRoomPanel(props: {
         setError("管理者のみ実行できます");
         return;
       }
-      const db = getFirestore(auth.app);
+      const db = getFirebaseFirestore();
       for (;;) {
         const snap = await getDocs(
           query(collection(db, CHAT_COLLECTION), limit(ADMIN_PURGE_BATCH))

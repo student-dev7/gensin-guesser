@@ -235,9 +235,14 @@ const ROMAN_STEP: Record<RomanTier, number> = {
 
 /** ランク名＋ローマティア（表示用） */
 export function formatRankTierLine(data: RankData): string {
-  return data.tierRoman != null
-    ? `${data.rankName} ${data.tierRoman}`
-    : data.rankName;
+  const name =
+    typeof data.rankName === "string" && data.rankName.trim().length > 0
+      ? data.rankName.trim()
+      : "—";
+  if (data.tierRoman != null) {
+    return `${name} ${data.tierRoman}`;
+  }
+  return name;
 }
 
 /**

@@ -6,7 +6,7 @@ import {
   query,
   type Firestore,
 } from "firebase/firestore";
-import { clampRating, DEFAULT_INITIAL_RATING } from "@/lib/rating";
+import { DEFAULT_INITIAL_RATING, parseSeasonRateField } from "@/lib/rating";
 
 /** `/ranking` ページと `/api/rankings` の既定の上位件数 */
 export const DEFAULT_LEADERBOARD_TOP_N = 30;
@@ -18,22 +18,18 @@ export const DEFAULT_LEADERBOARD_TOP_N = 30;
 export const USER_FIELD_LEADERBOARD_RATING = "leaderboard_rating" as const;
 
 /**
- * `rating` / `current_rate` の欠損や食い違いに耐える実効シーズンレート。
- * 両方あるときは大きい方（どちらか片方だけ欠けていても他方で評価できる）。
+ * `rating` / `current_rate` / `leaderboard_rating` の欠損や食い違いに耐える実効シーズンレート。
+ * 複数あるときは大きい方（文字列の数値・片方のみでも評価できる）。
  */
 export function effectiveSeasonRateFromUserData(
   data: Record<string, unknown>
 ): number {
-  const r = data.rating;
-  const cr = data.current_rate;
-  const a =
-    typeof r === "number" && Number.isFinite(r) ? clampRating(r) : null;
-  const b =
-    typeof cr === "number" && Number.isFinite(cr) ? clampRating(cr) : null;
-  if (a != null && b != null) return Math.max(a, b);
-  if (a != null) return a;
-  if (b != null) return b;
-  return DEFAULT_INITIAL_RATING;
+  const a = parseSeasonRateField(data.rating);
+  const b = parseSeasonRateField(data.current_rate);
+  const c = parseSeasonRateField(data[USER_FIELD_LEADERBOARD_RATING]);
+  const parts = [a, b, c].filter((n): n is number => n != null);
+  if (parts.length === 0) return DEFAULT_INITIAL_RATING;
+  return Math.max(...parts);
 }
 
 export type SeasonLeaderboardRow = {
@@ -67,11 +63,7 @@ export async function fetchSeasonLeaderboard(
 
   for (const d of snap.docs) {
     const data = d.data() as Record<string, unknown>;
-    const raw = data[USER_FIELD_LEADERBOARD_RATING];
-    const rating =
-      typeof raw === "number" && Number.isFinite(raw)
-        ? clampRating(raw)
-        : effectiveSeasonRateFromUserData(data);
+    const rating = effectiveSeasonRateFromUserData(data);
     const games =
       typeof data.games === "number" && Number.isFinite(data.games)
         ? data.games

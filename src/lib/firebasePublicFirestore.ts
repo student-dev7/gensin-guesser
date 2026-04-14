@@ -1,5 +1,6 @@
 import { type FirebaseApp, getApp, initializeApp } from "firebase/app";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import type { Firestore } from "firebase/firestore";
+import { getFirestoreForApp } from "./firestoreForApp";
 import { getFirebaseWebConfig } from "./firebaseWebConfig";
 
 const PUBLIC_APP_NAME = "genshin-guesser-public-read";
@@ -21,6 +22,6 @@ export function getPublicFirestore(): Firestore {
   } catch {
     app = initializeApp(config, PUBLIC_APP_NAME);
   }
-  cached = getFirestore(app);
+  cached = getFirestoreForApp(app);
   return cached;
 }

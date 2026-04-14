@@ -17,7 +17,6 @@ import {
   deleteDoc,
   doc,
   getDoc,
-  getFirestore,
   onSnapshot,
   serverTimestamp,
   setDoc,
@@ -26,10 +25,15 @@ import {
 import { ChatRoomPanel } from "../components/ChatRoomPanel";
 import { GoldCoinIcon } from "../components/GoldCoinIcon";
 import { MyRankStatus } from "../components/MyRankStatus";
-import { DEFAULT_INITIAL_RATING } from "../lib/rating";
+import {
+  DEFAULT_INITIAL_RATING,
+  parseJsonFiniteNumber,
+} from "../lib/rating";
+import { effectiveSeasonRateFromUserData } from "../lib/seasonLeaderboard";
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
+  getFirebaseFirestore,
 } from "../lib/firebaseClient";
 import { DEBUG_USER_UPDATED_EVENT } from "../lib/debugUserEvents";
 import { useAdminMode } from "@/components/AdminModeProvider";
@@ -212,7 +216,7 @@ function Home() {
       return;
     }
     setRoomDocLoading(true);
-    const db = getFirestore(getFirebaseAuth().app);
+    const db = getFirebaseFirestore();
     const unsub = onSnapshot(
       doc(db, "rooms", roomCodeFromUrl),
       (snap) => {
@@ -249,7 +253,7 @@ function Home() {
       setRoomJoinToast(null);
       return;
     }
-    const db = getFirestore(getFirebaseAuth().app);
+    const db = getFirebaseFirestore();
     const col = collection(db, "rooms", roomCodeFromUrl, "presence");
     const unsub = onSnapshot(
       col,
@@ -322,7 +326,7 @@ function Home() {
       if (cancelled) return;
       const uid = getFirebaseAuth().currentUser?.uid;
       if (!uid) return;
-      const db = getFirestore(getFirebaseAuth().app);
+      const db = getFirebaseFirestore();
       const pref = doc(db, "rooms", roomCodeFromUrl, "presence", uid);
       presenceDocRef.current = pref;
       try {
@@ -400,7 +404,7 @@ function Home() {
         typeof crypto !== "undefined"
           ? crypto.randomUUID()
           : String(Date.now());
-      const db = getFirestore(getFirebaseAuth().app);
+      const db = getFirebaseFirestore();
       await updateDoc(doc(db, "rooms", roomCodeFromUrl), {
         matchStarted: true,
         targetCharacterName: char.name,
@@ -434,7 +438,7 @@ function Home() {
       void (async () => {
         try {
           await ensureAnonymousSession();
-          const db = getFirestore(getFirebaseAuth().app);
+          const db = getFirebaseFirestore();
           await updateDoc(doc(db, "rooms", roomCodeFromUrl), {
             lastActivityAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
@@ -472,7 +476,7 @@ function Home() {
     setRoomDissolveBusy(true);
     try {
       await ensureAnonymousSession();
-      const db = getFirestore(getFirebaseAuth().app);
+      const db = getFirebaseFirestore();
       await dissolveRoomClient(db, roomCodeFromUrl);
       router.push("/rooms");
     } catch {
@@ -491,7 +495,7 @@ function Home() {
     try {
       await ensureAnonymousSession();
       const uid = getFirebaseAuth().currentUser?.uid;
-      const db = getFirestore(getFirebaseAuth().app);
+      const db = getFirebaseFirestore();
       if (uid) {
         await deleteDoc(
           doc(db, "rooms", roomCodeFromUrl, "presence", uid)
@@ -545,7 +549,7 @@ function Home() {
         setUserProfileLoading(false);
         return;
       }
-      const db = getFirestore(auth.app);
+      const db = getFirebaseFirestore();
       const snap = await getDoc(doc(db, "users", uid));
       if (!snap.exists()) {
         setTotalGold(0);
@@ -553,15 +557,10 @@ function Home() {
         setUserProfileLoading(false);
         return;
       }
-      const d = snap.data();
+      const d = snap.data() as Record<string, unknown>;
       const g =
         typeof d?.gold === "number" && Number.isFinite(d.gold) ? d.gold : 0;
-      const season =
-        typeof d?.current_rate === "number" && Number.isFinite(d.current_rate)
-          ? d.current_rate
-          : typeof d?.rating === "number" && Number.isFinite(d.rating)
-            ? d.rating
-            : DEFAULT_INITIAL_RATING;
+      const season = effectiveSeasonRateFromUserData(d);
       setTotalGold(g);
       setSeasonRatingForRank(season);
     } catch {
@@ -953,12 +952,9 @@ function Home() {
           setTotalGold(json.goldTotal);
         }
 
-        const before = json.playerRatingBefore ?? 0;
-        const after = json.playerRatingAfter ?? before;
-        const delta =
-          typeof json.ratingDelta === "number"
-            ? json.ratingDelta
-            : after - before;
+        const before = parseJsonFiniteNumber(json.playerRatingBefore, 0);
+        const after = parseJsonFiniteNumber(json.playerRatingAfter, before);
+        const delta = parseJsonFiniteNumber(json.ratingDelta, after - before);
 
         setRatingStats({
           before,
@@ -1250,7 +1246,7 @@ function Home() {
                           void (async () => {
                             try {
                               await ensureAnonymousSession();
-                              const db = getFirestore(getFirebaseAuth().app);
+                              const db = getFirebaseFirestore();
                               await updateDoc(
                                 doc(db, "rooms", roomCodeFromUrl),
                                 {
@@ -1278,7 +1274,7 @@ function Home() {
                           void (async () => {
                             try {
                               await ensureAnonymousSession();
-                              const db = getFirestore(getFirebaseAuth().app);
+                              const db = getFirebaseFirestore();
                               await updateDoc(
                                 doc(db, "rooms", roomCodeFromUrl),
                                 {

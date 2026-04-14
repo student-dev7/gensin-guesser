@@ -1,6 +1,7 @@
 import { deleteApp, initializeServerApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import type { Firestore } from "firebase/firestore";
+import { getFirestoreForApp } from "./firestoreForApp";
 import { getFirebaseWebConfig } from "./firebaseWebConfig";
 
 /**
@@ -23,7 +24,7 @@ export async function withUserFirestore<T>(
         "Firebase Auth did not restore the session from the ID token"
       );
     }
-    const db = getFirestore(app);
+    const db = getFirestoreForApp(app);
     return await fn(db);
   } finally {
     await deleteApp(app);

@@ -17,8 +17,10 @@ import {
   computeFixedLossRating,
   DEFAULT_INITIAL_RATING,
 } from "@/lib/rating";
+import { getAdminFirestore } from "@/lib/firebaseAdmin";
 import { getPublicFirestore } from "@/lib/firebasePublicFirestore";
 import { withUserFirestore } from "@/lib/firebaseUserFirestore";
+import { executeSubmitWithAdmin } from "./executeSubmitWithAdmin";
 import { getUidFromIdToken } from "@/lib/identityToolkit";
 import { goldEarnedFromRatingDelta } from "@/lib/gold";
 import {
@@ -30,7 +32,10 @@ import { isAdminUid } from "@/lib/adminUids";
 import { USER_FIELD_NEXT_WIN_RATING_DOUBLE } from "@/lib/shop";
 import { validateDisplayName } from "@/lib/validateDisplayName";
 import { ROOM_UNLIMITED_GUESS_CAP } from "@/lib/roomTypes";
-import { USER_FIELD_LEADERBOARD_RATING } from "@/lib/seasonLeaderboard";
+import {
+  effectiveSeasonRateFromUserData,
+  USER_FIELD_LEADERBOARD_RATING,
+} from "@/lib/seasonLeaderboard";
 
 type SubmitBody = {
   idToken: string;
@@ -83,17 +88,6 @@ async function resolveGhostHandCount(
   } catch {
     return undefined;
   }
-}
-
-function readSeasonRate(data: Record<string, unknown> | undefined): number {
-  if (!data) return DEFAULT_INITIAL_RATING;
-  const cr = data.current_rate;
-  if (typeof cr === "number" && Number.isFinite(cr)) return clampRating(cr);
-  const legacy = data.rating;
-  if (typeof legacy === "number" && Number.isFinite(legacy)) {
-    return clampRating(legacy);
-  }
-  return DEFAULT_INITIAL_RATING;
 }
 
 export async function POST(req: Request) {
@@ -281,7 +275,25 @@ export async function POST(req: Request) {
         : guessCount;
     const shouldIncrementCharacterStats = true;
 
-    const result = await withUserFirestore(idToken, async (db) => {
+    const adminDb = getAdminFirestore();
+    const submitParams = {
+      uid,
+      characterName,
+      roundId,
+      runRefId,
+      displayName,
+      won,
+      guessCount,
+      personalMode,
+      ghostHc,
+      storedHandCount,
+      statHandCountForCharacter,
+      shouldIncrementCharacterStats,
+    };
+
+    const result = adminDb
+      ? await executeSubmitWithAdmin(adminDb, submitParams)
+      : await withUserFirestore(idToken, async (db) => {
       const userRef = doc(db, "users", uid);
       const runRef = doc(db, "runs", `${uid}_${runRefId}`);
       const charStatsRef = doc(
@@ -364,7 +376,9 @@ export async function POST(req: Request) {
           ? (userSnap.data() as Record<string, unknown>)
           : undefined;
 
-        const Rp = readSeasonRate(userData);
+        const Rp = userData
+          ? effectiveSeasonRateFromUserData(userData)
+          : DEFAULT_INITIAL_RATING;
 
         const gamesBefore = userSnap.exists()
           ? (userSnap.data()?.games as number | undefined) ?? 0
@@ -552,6 +566,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json(result);
   } catch (e: unknown) {
+    console.error("[submit-result]", e);
     const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json(
       { ok: false, error: message },

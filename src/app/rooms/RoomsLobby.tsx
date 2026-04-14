@@ -8,7 +8,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  getFirestore,
   limit,
   query,
   serverTimestamp,
@@ -29,6 +28,7 @@ import { isAdminUid } from "@/lib/adminUids";
 import {
   ensureAnonymousSession,
   getFirebaseAuth,
+  getFirebaseFirestore,
 } from "@/lib/firebaseClient";
 import { onAuthStateChanged } from "firebase/auth";
 import { validateDisplayName } from "@/lib/validateDisplayName";
@@ -38,7 +38,7 @@ import {
 } from "@/lib/playerNameStorage";
 
 function firestoreDb() {
-  return getFirestore(getFirebaseAuth().app);
+  return getFirebaseFirestore();
 }
 
 const IS_NEXT_DEV = process.env.NODE_ENV === "development";

@@ -27,10 +27,7 @@ export function MyRankStatus(props: Props) {
   const accent = getRankAccentHex(data.rankId);
   const logoScale = getRankLogoContentScale(data.rankId);
 
-  const tierLine =
-    data.tierRoman != null
-      ? `${data.rankName} ${data.tierRoman}`
-      : data.rankName;
+  const tierLine = formatRankTierLine(data);
 
   return (
     <section className="flex shrink-0 flex-col items-center" aria-label="マイランク">
