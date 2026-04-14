@@ -1,6 +1,5 @@
 /**
- * Cloudflare Workers は eval を禁止。OpenNext の handler に含まれる
- * esbuild の `eval("quire".replace(/^/,"re"))` を `require` に置き換える。
+ * Cloudflare Workers は eval を禁止。OpenNext のバンドルに残る CJS 互換（eval / 間接 eval）を除去する。
  * @see https://github.com/opennextjs/opennextjs-cloudflare/issues/1155
  */
 import { readdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
@@ -8,53 +7,118 @@ import { join } from "node:path";
 
 const ROOT = ".open-next";
 
-/** sed と同じ: s/eval("quire".replace(\/^\/,"re"))/require/g */
+/** より具体的なパターンを先に並べる */
+const REPLACEMENT_ROUNDS = [
+  // __dirname を eval で取るパターン（issue #561 系）
+  [
+    /\(0\s*,\s*eval\)\s*\(\s*["']__dirname["']\s*\)/g,
+    '(typeof __dirname!=="undefined"?__dirname:"")',
+  ],
+  [/eval\s*\(\s*["']__dirname["']\s*\)/g, '(typeof __dirname!=="undefined"?__dirname:"")'],
+  // 間接 eval（esbuild / ncc でよく出る）— 直書き eval より先に処理
+  [/\(0\s*,\s*eval\)\s*\(\s*["']require["']\s*\)/g, "require"],
+  [
+    /\(0\s*,\s*eval\)\s*\(\s*"quire"\.replace\s*\(\s*\/\^\/\s*,\s*"re"\s*\)\s*\)/g,
+    "require",
+  ],
+  [
+    /\(0\s*,\s*eval\)\s*\(\s*'quire'\.replace\s*\(\s*\/\^\/\s*,\s*'re'\s*\)\s*\)/g,
+    "require",
+  ],
+  // 空白ゆるめの quire（ミニファイ差分）
+  [
+    /\(0\s*,\s*eval\)\s*\(\s*"quire"\s*\.\s*replace\s*\(\s*\/\^\/\s*,\s*"re"\s*\)\s*\)/g,
+    "require",
+  ],
+  // 直 eval
+  [/eval\s*\(\s*["']require["']\s*\)/g, "require"],
+  [/eval\s*\(\s*"quire"\.replace\s*\(\s*\/\^\/\s*,\s*"re"\s*\)\s*\)/g, "require"],
+  [/eval\s*\(\s*'quire'\.replace\s*\(\s*\/\^\/\s*,\s*'re'\s*\)\s*\)/g, "require"],
+  [
+    /eval\s*\(\s*"quire"\s*\.\s*replace\s*\(\s*\/\^\/\s*,\s*"re"\s*\)\s*\)/g,
+    "require",
+  ],
+];
+
+/** 文字列リテラルとして残っている既知の形（split で最終掃除） */
+const NEEDLES = [
+  'eval("quire".replace(/^/,"re"))',
+  "eval('quire'.replace(/^/,'re'))",
+  'eval("quire".replace(/^/, "re"))',
+  'eval("quire".replace( /^/ ,"re"))',
+  'eval("require")',
+  "eval('require')",
+  '(0,eval)("require")',
+  "(0,eval)('require')",
+  '(0,eval)("quire".replace(/^/,"re"))',
+  "(0,eval)('quire'.replace(/^/,'re'))",
+  '(0,eval)("__dirname")',
+  "(0,eval)('__dirname')",
+];
+
 function patchContents(s, fileLabel) {
+  let out = s;
   const orig = s;
 
-  const needles = [
-    // 公式 issue / sed と同一
-    'eval("quire".replace(/^/,"re"))',
-    "eval('quire'.replace(/^/,'re'))",
-    // カンマ周りに空白
-    'eval("quire".replace(/^/, "re"))',
-    'eval("quire".replace( /^/ ,"re"))',
-  ];
-
-  for (const n of needles) {
-    if (s.includes(n)) {
-      s = s.split(n).join("require");
-      console.log("patch-opennext-eval: replaced literal in", fileLabel);
+  for (const needle of NEEDLES) {
+    if (out.includes(needle)) {
+      out = out.split(needle).join("require");
+      console.log("patch-opennext-eval: replaced literal needle in", fileLabel);
     }
   }
 
-  // 2) 正規表現（minify で改行・空白が潰れた場合）
-  const res = [
-    [/eval\("quire"\.replace\(\/\^\/,\s*"re"\)\)/g, "require"],
-    [/eval\('quire'\.replace\(\/\^\/,\s*'re'\)\)/g, "require"],
-    [/eval\(\s*"quire"\s*\.\s*replace\s*\(\s*\/\^\/\s*,\s*"re"\s*\)\s*\)/g, "require"],
-  ];
-  for (const [re, to] of res) {
-    const next = s.replace(re, to);
-    if (next !== s) {
-      console.log("patch-opennext-eval: regex", re, "→", fileLabel);
-      s = next;
+  let changed = true;
+  let guard = 0;
+  while (changed && guard < 30) {
+    guard++;
+    changed = false;
+    for (const [re, to] of REPLACEMENT_ROUNDS) {
+      const next = out.replace(re, to);
+      if (next !== out) {
+        console.log("patch-opennext-eval: regex", String(re), "→", fileLabel);
+        out = next;
+        changed = true;
+      }
     }
   }
 
-  // 3) まだ残っていればログ用に断片を出す（CI で原因特定用）
-  if (s.includes('eval("quire"') || s.includes("eval('quire'")) {
-    const idx = s.indexOf('eval("quire"');
-    const idx2 = s.indexOf("eval('quire'");
-    const i = idx >= 0 ? idx : idx2;
-    if (i >= 0) {
-      const frag = s.slice(i, Math.min(s.length, i + 120));
-      console.warn("patch-opennext-eval: STILL has eval(quire) in", fileLabel);
-      console.warn("  fragment:", frag.replace(/\n/g, "\\n"));
-    }
+  if (out.includes('eval("quire"') || out.includes("eval('quire'")) {
+    const idx = out.includes('eval("quire"')
+      ? out.indexOf('eval("quire"')
+      : out.indexOf("eval('quire'");
+    const frag = out.slice(idx, Math.min(out.length, idx + 140));
+    console.warn("patch-opennext-eval: STILL has eval(quire) fragment in", fileLabel);
+    console.warn("  fragment:", frag.replace(/\n/g, "\\n"));
   }
 
-  return { next: s, changed: s !== orig };
+  return { next: out, changed: out !== orig };
+}
+
+/** sourceMappingURL の base64 等に偶然 eval( が含まれる誤検知を避ける */
+function stripSourceMapNoise(s) {
+  return s
+    .replace(/\/\/# sourceMappingURL=[^\n]*/g, "")
+    .replace(/\/\*# sourceMappingURL=[\s\S]*?\*\//g, "");
+}
+
+/** コードとしての eval( / new Function( を検出（コメントはミニファイで消えている前提） */
+function findForbiddenCodegen(s) {
+  const hits = [];
+  const evalRe = /\beval\s*\(/g;
+  const nfRe = /\bnew\s+Function\s*\(/g;
+  for (const re of [evalRe, nfRe]) {
+    re.lastIndex = 0;
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      const i = m.index;
+      hits.push({
+        kind: re === evalRe ? "eval" : "new Function",
+        index: i,
+        snippet: s.slice(i, Math.min(s.length, i + 160)).replace(/\s+/g, " "),
+      });
+    }
+  }
+  return hits;
 }
 
 function walk(dir, files = []) {
@@ -78,8 +142,13 @@ function walk(dir, files = []) {
 
 function main() {
   const files = walk(ROOT);
+  if (files.length === 0) {
+    console.error("patch-opennext-eval: no files under", ROOT, "(run opennext build first)");
+    process.exit(1);
+  }
+
   let changedFiles = 0;
-  let stillBad = false;
+  let stillQuireOrRequire = false;
 
   for (const file of files) {
     let s = readFileSync(file, "utf8");
@@ -90,23 +159,49 @@ function main() {
       changedFiles++;
       console.log("patched file:", file);
     }
-    if (s.includes('eval("quire"') || s.includes("eval('quire'")) {
-      stillBad = true;
+    if (
+      s.includes('eval("quire"') ||
+      s.includes("eval('quire'") ||
+      /eval\s*\(\s*["']require["']\s*\)/.test(s) ||
+      /\(0\s*,\s*eval\)\s*\(\s*["']quire/.test(s)
+    ) {
+      stillQuireOrRequire = true;
     }
   }
 
   if (changedFiles === 0) {
     console.log(
-      "patch-opennext-eval: no substitutions applied (check bundle for new eval patterns)",
+      "patch-opennext-eval: no file content changes (patterns may already be clean or differ)",
     );
   }
 
-  if (stillBad) {
+  if (stillQuireOrRequire) {
     console.error(
-      "patch-opennext-eval: FATAL: eval(quire) remains after patch — see fragments above",
+      "patch-opennext-eval: FATAL: eval(quire|require) pattern still present after patch",
     );
     process.exit(1);
   }
+
+  /** 任意の eval( / new Function( が残っていればデプロイしても EvalError になる */
+  let fatal = false;
+  for (const file of files) {
+    const s = stripSourceMapNoise(readFileSync(file, "utf8"));
+    const hits = findForbiddenCodegen(s);
+    if (hits.length === 0) continue;
+    fatal = true;
+    console.error("patch-opennext-eval: FATAL: forbidden codegen in", file);
+    for (const h of hits.slice(0, 5)) {
+      console.error(`  [${h.kind}]`, h.snippet);
+    }
+  }
+  if (fatal) {
+    console.error(
+      "patch-opennext-eval: fix patterns above or adjust dependencies; Workers disallow these calls.",
+    );
+    process.exit(1);
+  }
+
+  console.log("patch-opennext-eval: OK — no eval( / new Function( in bundle");
 }
 
 main();

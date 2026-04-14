@@ -11,10 +11,12 @@
     "vercel:deploy": "vercel deploy --prebuilt --prod",
     "vercel:deploy:preview": "vercel deploy --prebuilt",
     "deploy:vercel": "vercel build --yes && vercel deploy --prebuilt --prod",
-    "preview": "opennextjs-cloudflare build && node scripts/patch-opennext-eval.mjs && opennextjs-cloudflare preview",
-    "deploy": "opennextjs-cloudflare build && node scripts/patch-opennext-eval.mjs && opennextjs-cloudflare deploy",
-    "upload": "opennextjs-cloudflare build && node scripts/patch-opennext-eval.mjs && opennextjs-cloudflare upload",
-    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts"
+    "preview": "opennextjs-cloudflare build --noMinify && node scripts/patch-opennext-eval.mjs && opennextjs-cloudflare preview",
+    "deploy": "opennextjs-cloudflare build --noMinify && node scripts/patch-opennext-eval.mjs && opennextjs-cloudflare deploy",
+    "upload": "opennextjs-cloudflare build --noMinify && node scripts/patch-opennext-eval.mjs && opennextjs-cloudflare upload",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "dev:smoke": "wrangler dev -c wrangler.smoke.jsonc",
+    "deploy:smoke": "wrangler deploy -c wrangler.smoke.jsonc"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",
@@ -23,6 +25,9 @@
     "next": "16.2.3",
     "react": "19.2.4",
     "react-dom": "19.2.4"
+  },
+  "overrides": {
+    "@protobufjs/inquire": "npm:@untra/dontinquire@0.1.0"
   },
   "devDependencies": {
     "@opennextjs/cloudflare": "^1.19.1",

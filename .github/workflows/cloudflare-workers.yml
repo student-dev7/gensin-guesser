@@ -45,12 +45,12 @@ jobs:
           NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ${{ secrets.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET }}
           NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ secrets.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
           NEXT_PUBLIC_FIREBASE_APP_ID: ${{ secrets.NEXT_PUBLIC_FIREBASE_APP_ID }}
-        run: npx opennextjs-cloudflare build
+        run: npx opennextjs-cloudflare build --noMinify
 
       - name: Debug — show eval patterns in bundle
-        run: grep -R "eval(" .open-next --include="*.js" --include="*.mjs" 2>/dev/null | head -80 || true
+        run: grep -rE --include="*.js" --include="*.mjs" "eval\\(|new Function\\(" .open-next 2>/dev/null | head -120 || true
 
-      - name: Patch eval(require) for Workers runtime
+      - name: Patch eval-based require shims (Workers cannot use eval)
         run: node scripts/patch-opennext-eval.mjs
 
       - name: Deploy with Wrangler
